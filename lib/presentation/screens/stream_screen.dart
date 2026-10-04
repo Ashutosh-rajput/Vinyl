@@ -14,6 +14,7 @@ import 'package:vinyl/presentation/bloc/player/player_state.dart';
 import 'package:vinyl/presentation/screens/home_screen.dart';
 import 'package:vinyl/presentation/widgets/album_art_widget.dart';
 import 'package:vinyl/presentation/widgets/arrival_list.dart';
+import 'package:vinyl/presentation/widgets/stream_home_skeleton.dart';
 import 'package:vinyl/presentation/widgets/suggestion_placeholder_rows.dart';
 import 'package:vinyl/presentation/widgets/download_queue_snackbar.dart';
 import 'package:vinyl/services/download_service.dart';
@@ -905,16 +906,7 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
           }
         },
         child: (_isLoading && _selectedFilter < 3)
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(color: theme.colorScheme.primary),
-                    const SizedBox(height: 16),
-                    const Text('Loading recommendations...'),
-                  ],
-                ),
-              )
+            ? const StreamHomeSkeleton()
             : (_errorMessage != null && _selectedFilter == 0)
                 ? _buildStreamFailureView()
                 : RefreshIndicator(
