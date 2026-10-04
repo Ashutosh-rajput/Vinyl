@@ -10,19 +10,44 @@
 // artist's song with the same name, or a dub in another language, is a
 // different song.
 
-/// Splits an artist credit like "Arijit Singh, Pritam feat. X" into clean,
-/// lower-case names.
-List<String> parseArtistNames(String artists) {
-  if (artists.trim().isEmpty) return const [];
+/// The artists of a credit as written, without the album JioSaavn glues onto it:
+/// "Nadeem-Shravan - Kasoor" -> "Nadeem-Shravan". Only a spaced " - " counts, so
+/// hyphenated names stay whole.
+String stripAlbumSuffix(String credit) => credit.split(RegExp(r'\s+[-\u2013\u2014]\s+')).first.trim();
+
+/// The album glued onto a credit ("Nadeem-Shravan - Kasoor" -> "Kasoor"), or null.
+String? albumSuffixOf(String credit) {
+  final parts = credit.split(RegExp(r'\s+[-\u2013\u2014]\s+'));
+  if (parts.length < 2) return null;
+  final album = parts.sublist(1).join(' - ').trim();
+  return album.isEmpty ? null : album;
+}
+
+/// Splits an artist credit like "Arijit Singh, Pritam feat. X" into the names as
+/// written (punctuation kept: "Nadeem-Shravan", "KR$NA"). The album JioSaavn
+/// adds after " - " is not an artist and is dropped first.
+List<String> splitArtistCredit(String credit) {
+  final artists = stripAlbumSuffix(credit);
+  if (artists.isEmpty) return const [];
   return artists
       .split(_artistSplit)
-      .map((t) => t.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), ''))
-      .where((t) => t.isNotEmpty && t != 'unknown' && t != 'various artists')
+      .map((t) => t.trim())
+      .where((t) => t.isNotEmpty && t.toLowerCase() != 'unknown' && t.toLowerCase() != 'various artists')
+      .toList();
+}
+
+/// Splits an artist credit like "Arijit Singh, Pritam feat. X" into clean,
+/// lower-case names, for comparing (punctuation removed).
+List<String> parseArtistNames(String artists) {
+  if (artists.trim().isEmpty) return const [];
+  return splitArtistCredit(artists)
+      .map((t) => t.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), ''))
+      .where((t) => t.isNotEmpty)
       .toList();
 }
 
 final RegExp _artistSplit = RegExp(
-  r'[,&/]|(?:\s+feat\.?\s+)|\s+ft\.?\s+|\s+featuring\s+|(?:\s+with\s+)',
+  r'[,&/]|(?:\s+feat\.?\s+)|\s+ft\.?\s+|\s+featuring\s+|(?:\s+with\s+)|\s+x\s+',
   caseSensitive: false,
 );
 

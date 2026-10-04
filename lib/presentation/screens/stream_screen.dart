@@ -13,10 +13,14 @@ import 'package:vinyl/presentation/bloc/player/player_event.dart';
 import 'package:vinyl/presentation/bloc/player/player_state.dart';
 import 'package:vinyl/presentation/screens/home_screen.dart';
 import 'package:vinyl/presentation/widgets/album_art_widget.dart';
+import 'package:vinyl/presentation/widgets/arrival_list.dart';
+import 'package:vinyl/presentation/widgets/suggestion_placeholder_rows.dart';
 import 'package:vinyl/presentation/widgets/download_queue_snackbar.dart';
 import 'package:vinyl/services/download_service.dart';
 import 'package:vinyl/services/settings_service.dart';
 import 'package:vinyl/services/stream_cache_service.dart';
+import 'package:vinyl/services/suggestion/suggestion_models.dart';
+import 'package:vinyl/services/suggestion/suggestion_service.dart';
 import 'package:vinyl/services/user_taste_service.dart';
 import 'package:vinyl/services/stream_favorites_service.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -56,6 +60,11 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
   List<Song> _lastPlayedStreamSongs = [];
   List<JioSaavnItem> _suggestedSongs = [];
 
+  // Suggestions arrive in stages: YouTube and JioSaavn first, MetaBrainz's
+  // songs (slow: 20-40 s) later. They are shown as they come.
+  StreamSubscription<List<Suggestion>>? _suggestionsSub;
+  bool _suggestionsRefining = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -71,6 +80,7 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
   @override
   void dispose() {
     HomeScreen.tabNotifier.removeListener(_handleTabChange);
+    _suggestionsSub?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -109,51 +119,38 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
       _topPlayed = await getIt<MusicRepository>().getMostPlayedSongs(limit: 5, streamOnly: true);
       _lastPlayedStreamSongs = await getIt<MusicRepository>().getLastPlayedStreamSongs();
 
-      // 2. Fetch related albums using top played songs
-      _relatedAlbums = await _fetchRelatedAlbumsForTopSongs(_topPlayed);
+      // 2. Start the suggestions NOW, in parallel with everything below, so
+      // that the section is there when the page is (JioSaavn's songs answer in
+      // about a second; YouTube's and MetaBrainz's are added as they arrive).
+      _startHomeSuggestions(
+        seeds: [
+          ...UserTasteService.instance.topSeedSongs(limit: 3),
+          ...StreamFavoritesService.instance.favorites.take(2).map(SeedSong.fromSong),
+          ..._lastPlayedStreamSongs.take(2).map(SeedSong.fromSong),
+        ],
+      );
 
-      // 3. Fetch new releases, home feed, and PulseIQ personalized suggestions in parallel
+      // 3. Fetch the related albums, new releases and the home feed together
+      // (they used to run one after another).
       final results = await Future.wait([
         JioSaavnDecoder.fetchNewReleases(lang: _currentLang),
         JioSaavnDecoder.fetchHomeFeed(lang: _currentLang),
-        UserTasteService.instance.getPersonalizedSuggestions(
-          topPlayed: _topPlayed,
-          streamHistory: _lastPlayedStreamSongs,
-          favorites: StreamFavoritesService.instance.favorites,
-          lang: _currentLang,
-          limit: 30,
-        ),
+        _fetchRelatedAlbumsForTopSongs(_topPlayed),
       ]);
 
       final newReleases = results[0] as List<JioSaavnItem>;
       final homeModules = results[1] as Map<String, List<JioSaavnItem>>;
-      List<JioSaavnItem> suggestions = results[2] as List<JioSaavnItem>;
-
-      // Fallback seed if suggestions are empty (e.g., initial start or offline network glitch)
-      if (suggestions.isEmpty) {
-        String? seedId;
-        for (final list in homeModules.values) {
-          for (final item in list) {
-            if (item.isSong && item.id.isNotEmpty) {
-              seedId = item.id;
-              break;
-            }
-          }
-          if (seedId != null) break;
-        }
-        seedId ??= newReleases.where((i) => i.isSong && i.id.isNotEmpty).firstOrNull?.id;
-        if (seedId != null && seedId.isNotEmpty) {
-          suggestions = await JioSaavnDecoder.fetchSongSuggestions(seedId, limit: 25);
-        }
-      }
 
       if (!mounted) return;
       setState(() {
         _newReleases = newReleases;
         _homeModules = homeModules;
-        _suggestedSongs = suggestions;
+        _relatedAlbums = results[2] as List<JioSaavnItem>;
         _isLoading = false;
       });
+
+      // Nothing to base suggestions on (new user, or offline)? Use the feed.
+      if (_suggestedSongs.isEmpty && !_suggestionsRefining) _suggestFromHomeFeed();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -426,6 +423,64 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
     );
   }
 
+  /// Starts (or restarts) the Stream home suggestions for [seeds]: several
+  /// songs in, many songs out.
+  ///
+  /// The list is shown as soon as the fast sources have answered, and improves
+  /// when MetaBrainz's songs arrive; the new rows glide in between the ones
+  /// already there (see [ArrivalList]).
+  void _startHomeSuggestions({required List<SeedSong> seeds}) {
+    _suggestionsSub?.cancel();
+    if (seeds.isEmpty) {
+      setState(() => _suggestionsRefining = false);
+      return;
+    }
+
+    setState(() => _suggestionsRefining = true);
+    _suggestionsSub = getIt<SuggestionService>()
+        .suggestProgressive(
+          seeds,
+          limit: 30,
+          exclude: _lastPlayedStreamSongs.map(SeedSong.fromSong),
+        )
+        .listen(
+      (suggestions) {
+        if (!mounted) return;
+        setState(() => _suggestedSongs = [for (final s in suggestions) s.item]);
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() => _suggestionsRefining = false);
+        // Every source came back empty: fall back to the home feed.
+        if (_suggestedSongs.isEmpty && _homeModules.isNotEmpty) _suggestFromHomeFeed();
+      },
+      onError: (_) {
+        if (mounted) setState(() => _suggestionsRefining = false);
+      },
+    );
+  }
+
+  /// Fallback when there is nothing to base suggestions on yet (a new user, or
+  /// offline): songs similar to the first song of the home feed.
+  Future<void> _suggestFromHomeFeed() async {
+    String? seedId;
+    for (final list in _homeModules.values) {
+      for (final item in list) {
+        if (item.isSong && item.id.isNotEmpty) {
+          seedId = item.id;
+          break;
+        }
+      }
+      if (seedId != null) break;
+    }
+    seedId ??= _newReleases.where((i) => i.isSong && i.id.isNotEmpty).firstOrNull?.id;
+    if (seedId == null || seedId.isEmpty) return;
+    final suggestions = await JioSaavnDecoder.fetchSongSuggestions(seedId, limit: 25);
+    if (mounted && suggestions.isNotEmpty && _suggestedSongs.isEmpty) {
+      setState(() => _suggestedSongs = suggestions);
+    }
+  }
+
   Future<void> _streamSingleSong(
     JioSaavnItem item, {
     List<JioSaavnItem>? contextQueue,
@@ -487,17 +542,10 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
       });
 
 
-      UserTasteService.instance.getCandidateRecommendations(
-        context: RecommendationContext.home,
-        currentSong: song,
-        recentHistory: _lastPlayedStreamSongs,
-        lang: _currentLang,
-        limit: 30,
-      ).then((suggestions) {
-        if (mounted && suggestions.isNotEmpty) {
-          setState(() => _suggestedSongs = suggestions);
-        }
-      }).catchError((_) {});
+      _startHomeSuggestions(seeds: [
+        SeedSong.fromSong(song),
+        ...UserTasteService.instance.topSeedSongs(limit: 2),
+      ]);
 
       if (getIt<SettingsService>().autoDownloadStreamSongs) {
         _downloadSong(item, overrideUrl: streamUrl);
@@ -985,27 +1033,39 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
           const SizedBox(height: 16),
         ],
 
-        // 1. Song Suggestions (PulseIQ Multi-Seed & Composer Radar)
-        if (_suggestedSongs.isNotEmpty) ...[
+        // 1. Song Suggestions: on screen from the start; placeholder rows while
+        // the first songs are found, then the songs, and later songs glide in.
+        if (_suggestedSongs.isNotEmpty || _suggestionsRefining) ...[
           _buildSectionHeader(
             title: 'Song Suggestions',
-            subtitle: (_topPlayed.isNotEmpty || StreamFavoritesService.instance.favorites.isNotEmpty)
-                ? 'Curated from your favorite artists & composers'
-                : 'Recommended songs for you',
+            subtitle: _suggestionsRefining
+                ? 'Finding more songs for you…'
+                : (_topPlayed.isNotEmpty || StreamFavoritesService.instance.favorites.isNotEmpty)
+                    ? 'Curated from your favorite artists & composers'
+                    : 'Recommended songs for you',
             icon: Icons.recommend_rounded,
             actionLabel: _suggestedSongs.length > 6 ? 'See All (${_suggestedSongs.length})' : null,
             onAction: _openSuggestedSongsDetails,
           ),
-          ..._suggestedSongs.take(10).map((item) => _StreamSongTile(
-                item: item,
-                isLoading: _loadingSongId == item.id,
-                onPlay: () => _streamSingleSong(
-                  item,
-                  contextQueue: _suggestedSongs,
-                ),
-                onDownload: () => _downloadSong(item),
-                onAddToQueue: () => _addSongToQueue(item),
-              )),
+          if (_suggestedSongs.isEmpty)
+            const SuggestionPlaceholderRows()
+          else
+          // Songs that arrive later (YouTube, MetaBrainz) glide in between these rows.
+          ArrivalList<JioSaavnItem>(
+            items: _suggestedSongs.take(10).toList(),
+            idOf: (item) => item.id,
+            animateInitial: true,
+            itemBuilder: (context, item) => _StreamSongTile(
+              item: item,
+              isLoading: _loadingSongId == item.id,
+              onPlay: () => _streamSingleSong(
+                item,
+                contextQueue: _suggestedSongs,
+              ),
+              onDownload: () => _downloadSong(item),
+              onAddToQueue: () => _addSongToQueue(item),
+            ),
+          ),
           const SizedBox(height: 16),
         ],
 

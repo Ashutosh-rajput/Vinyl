@@ -26,6 +26,15 @@ class JioSaavnItem extends Equatable {
   // Album-specific
   final String? songCount;
 
+  /// Name of the album a song belongs to (songs only).
+  final String? album;
+
+  /// True when JioSaavn marks the song as explicit.
+  final bool explicit;
+
+  /// How many times JioSaavn users have streamed the song (0 when unknown).
+  final int playCount;
+
   const JioSaavnItem({
     required this.type,
     required this.id,
@@ -41,6 +50,9 @@ class JioSaavnItem extends Equatable {
     this.duration,
     this.quality = '320 kbps',
     this.songCount,
+    this.album,
+    this.explicit = false,
+    this.playCount = 0,
   });
 
   bool get isSong => type == 'song';
@@ -177,6 +189,6 @@ class JioSaavnItem extends Equatable {
 
   @override
   List<Object?> get props =>
-      [type, id, token, title, subtitle, imageUrl, language, year, music, encryptedMediaUrl, directMediaUrl, duration, quality, songCount];
+      [type, id, token, title, subtitle, imageUrl, language, year, music, encryptedMediaUrl, directMediaUrl, duration, quality, songCount, album, explicit, playCount];
 }
 

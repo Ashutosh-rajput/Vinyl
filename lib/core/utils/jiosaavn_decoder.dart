@@ -215,12 +215,26 @@ class JioSaavnDecoder {
   }
 
   /// Parses any JioSaavn JSON item into a JioSaavnItem
+  /// JioSaavn sends text with HTML escapes ("From &quot;Film&quot;"); this
+  /// turns them back into the characters they stand for.
+  static String decodeHtmlEntities(String s) {
+    if (!s.contains('&')) return s;
+    return s
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&'); // last, so "&amp;quot;" is not double-decoded
+  }
+
   static JioSaavnItem parseItem(Map<String, dynamic> item) {
     final type = item['type']?.toString().toLowerCase() ?? 'album';
     final id = item['id']?.toString() ?? '';
     final token = item['token']?.toString() ?? id;
-    final title = (item['title'] ?? item['name'])?.toString() ?? '';
-    var subtitle = item['subtitle']?.toString() ?? '';
+    final title = decodeHtmlEntities((item['title'] ?? item['name'])?.toString() ?? '');
+    var subtitle = decodeHtmlEntities(item['subtitle']?.toString() ?? '');
     if (subtitle.isEmpty && type == 'artist') {
       subtitle = 'Artist';
     }
@@ -270,6 +284,11 @@ class JioSaavnDecoder {
       duration: duration,
       songCount: songCount,
       quality: '320 kbps',
+      album: type == 'song' ? (moreInfo?['album'] == null ? null : decodeHtmlEntities(moreInfo!['album'].toString())) : null,
+      explicit: item['isExplicit'] == true ||
+          item['explicit_content']?.toString() == '1' ||
+          item['explicit']?.toString() == 'true',
+      playCount: type == 'song' ? int.tryParse((item['play_count'] ?? moreInfo?['play_count'] ?? '').toString()) ?? 0 : 0,
     );
   }
 

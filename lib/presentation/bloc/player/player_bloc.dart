@@ -16,6 +16,9 @@ import 'package:vinyl/core/utils/jiosaavn_decoder.dart';
 import 'package:vinyl/core/utils/song_dedupe.dart';
 import 'package:vinyl/core/utils/song_origin.dart';
 import 'package:vinyl/services/stream_cache_service.dart';
+import 'package:vinyl/data/models/jiosaavn_item.dart';
+import 'package:vinyl/services/suggestion/suggestion_models.dart';
+import 'package:vinyl/services/suggestion/suggestion_service.dart';
 import 'package:vinyl/services/user_taste_service.dart';
 
 /// Restartable event transformer using RxDart's switchMap to drop superseded play events.
@@ -25,6 +28,69 @@ EventTransformer<E> restartable<E>() {
 
 class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   final AudioPlayerService _audioService;
+
+  /// Songs in, suggested songs out. Autoplay uses [_suggestions]; Radio uses
+  /// [_radioSuggestions], which also adds the credited artists' other songs.
+  /// When none is given (tests, or an app without the setup) a standard one is
+  /// created on first use.
+  final SuggestionService? _suggestionService;
+  final SuggestionService? _radioSuggestionService;
+  late final SuggestionService _fallbackService = SuggestionService.standard(
+    language: () => _streamLanguage,
+    tasteBoost: _tasteBoost,
+  );
+  SuggestionService get _suggestions => _suggestionService ?? _fallbackService;
+  SuggestionService get _radioSuggestions => _radioSuggestionService ?? _suggestionService ?? _fallbackService;
+
+  static double _tasteBoost(JioSaavnItem item) =>
+      UserTasteService.instance.likeness(item) * SuggestionService.maxTasteBoost;
+
+  /// The songs Autoplay asks suggestions for: up to [_maxAutoplaySeeds] of the
+  /// user's own queue, so the queue continues what they have been listening to
+  /// rather than a single song.
+  ///
+  /// In this order: the song the user picked, the song playing now, then the
+  /// songs played just before it (nearest first), then any still to come. Songs
+  /// that Autoplay itself added are skipped (suggestions of suggestions drift
+  /// away from the user's taste).
+  static const int _maxAutoplaySeeds = 5;
+
+  List<SeedSong> _autoplaySeeds(Song anchor) {
+    final ordered = <Song>[anchor];
+    final current = _currentSong;
+    if (current != null) ordered.add(current);
+
+    final currentIndex = current == null ? -1 : _queue.indexWhere((s) => s.id == current.id);
+    if (currentIndex != -1) {
+      ordered.addAll(_queue.sublist(0, currentIndex).reversed); // played before, nearest first
+      ordered.addAll(_queue.sublist(currentIndex + 1)); // still to come
+    }
+
+    final seen = <int>{};
+    final seeds = <SeedSong>[];
+    for (final song in ordered) {
+      if (song.id != anchor.id && _autoplayIds.contains(song.id)) continue; // not the user's own pick
+      if (!seen.add(song.id)) continue;
+      seeds.add(SeedSong.fromSong(song));
+      if (seeds.length >= _maxAutoplaySeeds) break;
+    }
+    return seeds;
+  }
+
+  /// Starts MetaBrainz's slow lookup for a song that has just begun, so its
+  /// answer is ready by the time Autoplay or Radio needs it. Stream songs only:
+  /// Library songs continue from the Library.
+  void _warmUpSuggestions(Song song) {
+    if (_isLibrarySong(song)) return;
+    try {
+      _suggestions.warmUp(SeedSong.fromSong(song));
+    } catch (_) {}
+  }
+
+  /// Songs that must not come back as suggestions: the queue and what was
+  /// played recently.
+  List<SeedSong> _excluded(Iterable<Song> recent) =>
+      [..._queue, ...recent].map(SeedSong.fromSong).toList();
   final MusicRepository? _repository;
   final SettingsService? _settingsService;
   StreamSubscription? _positionSubscription;
@@ -77,9 +143,13 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     required AudioPlayerService audioService,
     MusicRepository? repository,
     SettingsService? settingsService,
+    SuggestionService? suggestionService,
+    SuggestionService? radioSuggestionService,
   })  : _audioService = audioService,
         _repository = repository,
         _settingsService = settingsService,
+        _suggestionService = suggestionService,
+        _radioSuggestionService = radioSuggestionService ?? suggestionService,
         super(const PlayerInitial()) {
     _isShuffle = settingsService?.shuffleByDefault ?? false;
     _autoPlayNext = settingsService?.autoPlayNext ?? true;
@@ -362,6 +432,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       _repository?.updateSong(activeSong, notify: false);
       await _repository?.recordSongPlay(activeSong);
       UserTasteService.instance.onSongStarted(activeSong);
+      _warmUpSuggestions(activeSong);
 
       emit(PlayerPlaying(
         song: activeSong,
@@ -626,14 +697,12 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       final recent = _repository != null
           ? await _repository.getLastPlayedStreamSongs(limit: 20)
           : <Song>[];
-      List<Song> radioSongs = await UserTasteService.instance.getRecommendations(
-        context: RecommendationContext.radio,
-        currentSong: currentSong,
-        queue: _queue,
-        recentHistory: recent,
-        lang: _streamLanguage,
+      final suggestions = await _radioSuggestions.suggest(
+        [SeedSong.fromSong(currentSong)],
         limit: 25,
+        exclude: _excluded(recent),
       );
+      List<Song> radioSongs = [for (final s in suggestions) s.toSong()];
 
       // Fallback to artist search if recommendations are empty
       if (radioSongs.isEmpty && currentSong.artist.trim().isNotEmpty && currentSong.artist != 'Unknown') {
@@ -1227,21 +1296,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     return category == null || category == ContentClassifier.ofSong(seed);
   }
 
-  /// Autoplay for a Stream song: PulseIQ recommendations, or (offline /
+  /// Autoplay for a Stream song: suggestions from the SuggestionService, or (offline /
   /// no results) songs from the offline stream cache. Never Library songs.
   Future<List<Song>> _streamAutoplaySongs(Song seed) async {
     final recent = _repository != null
         ? await _repository.getLastPlayedStreamSongs(limit: 20)
         : <Song>[];
 
-    final recs = await UserTasteService.instance.getRecommendations(
-      context: RecommendationContext.autoplay,
-      currentSong: seed,
-      queue: _queue,
-      recentHistory: recent,
-      lang: _streamLanguage,
-      limit: 15,
-    );
+    final seeds = _autoplaySeeds(seed);
+    final suggestions = await _suggestions.suggest(seeds, limit: 15, exclude: _excluded(recent));
+    final recs = [for (final s in suggestions) s.toSong()];
     if (recs.isNotEmpty) return recs;
 
     final existingIds = _queue.map((s) => s.id).toSet();

@@ -13,6 +13,11 @@ import 'package:vinyl/services/settings_service.dart';
 import 'package:vinyl/services/download_service.dart';
 import 'package:vinyl/services/lyrics_service.dart';
 import 'package:vinyl/services/stream_cache_service.dart';
+import 'package:vinyl/data/models/jiosaavn_item.dart';
+import 'package:vinyl/services/suggestion/jio_resolver.dart';
+import 'package:vinyl/services/suggestion/providers/metabrainz_provider.dart';
+import 'package:vinyl/services/suggestion/providers/youtube_provider.dart';
+import 'package:vinyl/services/suggestion/suggestion_service.dart';
 import 'package:vinyl/services/user_taste_service.dart';
 import 'package:vinyl/services/stream_favorites_service.dart';
 import 'package:vinyl/services/stream_playlists_service.dart';
@@ -20,6 +25,10 @@ import 'package:vinyl/services/stream_playlists_service.dart';
 import 'package:vinyl/presentation/bloc/theme/theme_cubit.dart';
 
 final getIt = GetIt.instance;
+
+/// Name of the Radio flavour of the [SuggestionService] (it also adds the
+/// credited artists' other songs).
+const String radioSuggestionService = 'radio';
 
 Future<void> getItSetup() async {
   // Database & Preferences
@@ -68,6 +77,33 @@ Future<void> getItSetup() async {
   getIt.registerLazySingleton<UserTasteService>(
     () => UserTasteService(),
   );
+
+  // Suggestions: songs in, suggested songs out (MetaBrainz > YouTube > JioSaavn).
+  // The two services share one MetaBrainz provider and one JioSaavn matcher, so
+  // slow MetaBrainz answers and JioSaavn matches are fetched once and reused.
+  final metaBrainz = MetaBrainzProvider();
+  final jioResolver = JioResolver(youtubeLength: YoutubeProvider.videoLength);
+  String streamLanguage() => getIt<SettingsService>().streamLanguage;
+  double taste(JioSaavnItem item) =>
+      getIt<UserTasteService>().likeness(item) * SuggestionService.maxTasteBoost;
+  getIt.registerLazySingleton<SuggestionService>(
+    () => SuggestionService.standard(
+      language: streamLanguage,
+      tasteBoost: taste,
+      resolver: jioResolver,
+      metaBrainz: metaBrainz,
+    ),
+  );
+  getIt.registerLazySingleton<SuggestionService>(
+    () => SuggestionService.standard(
+      includeArtistSongs: true,
+      language: streamLanguage,
+      tasteBoost: taste,
+      resolver: jioResolver,
+      metaBrainz: metaBrainz,
+    ),
+    instanceName: radioSuggestionService,
+  );
   getIt.registerLazySingleton<StreamFavoritesService>(
     () => StreamFavoritesService(),
   );
@@ -85,6 +121,8 @@ Future<void> getItSetup() async {
       audioService: getIt<AudioPlayerService>(),
       repository: getIt<MusicRepository>(),
       settingsService: getIt<SettingsService>(),
+      suggestionService: getIt<SuggestionService>(),
+      radioSuggestionService: getIt<SuggestionService>(instanceName: radioSuggestionService),
     ),
     dispose: (bloc) => bloc.close(),
   );

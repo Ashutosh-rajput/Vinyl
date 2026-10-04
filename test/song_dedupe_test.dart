@@ -80,4 +80,28 @@ void main() {
       );
     });
   });
+  group('artist credits from JioSaavn', () {
+    test('the album glued on after " - " is not an artist', () {
+      expect(parseArtistNames('Nadeem-Shravan - Kasoor'), ['nadeemshravan']);
+      expect(parseArtistNames('Babul Supriyo, Alka Yagnik, Himesh Reshammiya - Vaada'),
+          ['babul supriyo', 'alka yagnik', 'himesh reshammiya']);
+      expect(parseArtistNames("Udit Narayan, Alka Yagnik - Kyon Ki - It's Fate"), ['udit narayan', 'alka yagnik']);
+    });
+
+    test('hyphenated names are not cut (only a SPACED hyphen separates the album)', () {
+      expect(splitArtistCredit('Nadeem-Shravan'), ['Nadeem-Shravan']);
+      expect(splitArtistCredit('Sachin-Jigar, Arijit Singh'), ['Sachin-Jigar', 'Arijit Singh']);
+    });
+
+    test('display names keep their punctuation', () {
+      expect(splitArtistCredit('KR\$NA, Dhanda Nyoliwala - Boom Shaka'), ['KR\$NA', 'Dhanda Nyoliwala']);
+    });
+
+    test('stripAlbumSuffix and albumSuffixOf', () {
+      expect(stripAlbumSuffix('Nadeem-Shravan - Kasoor'), 'Nadeem-Shravan');
+      expect(albumSuffixOf('Nadeem-Shravan - Kasoor'), 'Kasoor');
+      expect(albumSuffixOf('Nadeem-Shravan'), isNull);
+      expect(albumSuffixOf("A - Kyon Ki - It's Fate"), "Kyon Ki - It's Fate");
+    });
+  });
 }

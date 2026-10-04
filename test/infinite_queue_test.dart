@@ -6,8 +6,42 @@ import 'package:vinyl/data/models/song_model.dart';
 import 'package:vinyl/presentation/bloc/player/player_bloc.dart';
 import 'package:vinyl/presentation/bloc/player/player_event.dart';
 import 'package:vinyl/presentation/bloc/player/player_state.dart';
-import 'package:vinyl/services/user_taste_service.dart';
+import 'package:vinyl/services/suggestion/jio_resolver.dart';
+import 'package:vinyl/services/suggestion/suggestion_models.dart';
+import 'package:vinyl/services/suggestion/suggestion_provider.dart';
+import 'package:vinyl/services/suggestion/suggestion_service.dart';
 import 'helpers/mock_audio_service.dart';
+
+/// A suggestion source whose answer each test can script. It also records what
+/// it was asked, and which songs it was told to warm up for.
+class ScriptedProvider implements SuggestionProvider, WarmableProvider {
+  Future<List<JioSaavnItem>> Function(SeedSong seed) script = (_) async => const [];
+  final List<SeedSong> asked = [];
+  final List<SeedSong> warmed = [];
+
+  @override
+  void warmUp(SeedSong seed) => warmed.add(seed);
+
+  @override
+  SuggestionSource get source => SuggestionSource.jioSaavn;
+
+  @override
+  Future<List<SuggestionCandidate>> suggest(SeedSong seed, {int limit = 25}) async {
+    asked.add(seed);
+    final items = await script(seed);
+    return [
+      for (var i = 0; i < items.length; i++)
+        SuggestionCandidate(
+          title: items[i].title,
+          artist: items[i].subtitle,
+          source: SuggestionSource.jioSaavn,
+          rank: i,
+          providerId: items[i].id,
+          jio: items[i],
+        ),
+    ];
+  }
+}
 
 void main() {
   setupPlatformMocks();
@@ -15,6 +49,7 @@ void main() {
   group('Infinite Playback Queue Auto-Expansion Tests', () {
     late MockAudioPlayerService audioService;
     late PlayerBloc playerBloc;
+    late ScriptedProvider suggestions;
 
     Song createSong(int id, String title, {String artist = 'Artist'}) {
       return Song(
@@ -45,21 +80,22 @@ void main() {
     setUp(() {
       audioService = MockAudioPlayerService();
 
-      // Configure UserTasteService mock functions
-      UserTasteService(
-        clock: () => DateTime.now(),
-        searchSongs: (q) async => [
-          createItem('seed_1', 'Target Seed', artist: 'Seed Artist'),
-        ],
-        fetchSuggestions: (id, {limit = 10}) async => [
-          createItem('sug_101', 'Infinite Track 1', artist: 'Discovery 1'),
-          createItem('sug_102', 'Infinite Track 2', artist: 'Discovery 2'),
-          createItem('sug_103', 'Infinite Track 3', artist: 'Discovery 3'),
-          createItem('sug_104', 'Infinite Track 4', artist: 'Discovery 4'),
-        ],
-      );
+      // What the suggestion service answers; tests change it where needed.
+      suggestions = ScriptedProvider()
+        ..script = (_) async => [
+              createItem('sug_101', 'Infinite Track 1', artist: 'Discovery 1'),
+              createItem('sug_102', 'Infinite Track 2', artist: 'Discovery 2'),
+              createItem('sug_103', 'Infinite Track 3', artist: 'Discovery 3'),
+              createItem('sug_104', 'Infinite Track 4', artist: 'Discovery 4'),
+            ];
 
-      playerBloc = PlayerBloc(audioService: audioService);
+      playerBloc = PlayerBloc(
+        audioService: audioService,
+        suggestionService: SuggestionService(
+          providers: [suggestions],
+          resolver: JioResolver(search: (q) async => const []),
+        ),
+      );
     });
 
     tearDown(() {
@@ -149,16 +185,10 @@ void main() {
 
     test('Queue expansion excludes existing songs to prevent duplicates', () async {
       // Setup suggestions containing a duplicate of a song already in queue
-      UserTasteService(
-        clock: () => DateTime.now(),
-        searchSongs: (q) async => [
-          createItem('seed_x', 'Second Song', artist: 'Artist'),
-        ],
-        fetchSuggestions: (id, {limit = 10}) async => [
-          createItem('dup', 'Existing Song', artist: 'Artist'), // Duplicate
-          createItem('unique_1', 'Brand New Song', artist: 'New Artist'),
-        ],
-      );
+      suggestions.script = (_) async => [
+            createItem('dup', 'Existing Song', artist: 'Artist'), // Duplicate
+            createItem('unique_1', 'Brand New Song', artist: 'New Artist'),
+          ];
 
       final initialQueue = [
         createSong(10, 'Existing Song', artist: 'Artist'),
@@ -252,14 +282,10 @@ void main() {
       // Slow recommendation service: the fetch started on the last song is
       // still running when the user taps Next.
       final fetchRelease = Completer<void>();
-      UserTasteService(
-        clock: () => DateTime.now(),
-        searchSongs: (q) async => [createItem('seed_1', 'Target Seed', artist: 'Seed Artist')],
-        fetchSuggestions: (id, {limit = 10}) async {
-          await fetchRelease.future;
-          return [createItem('slow_1', 'Slow Track', artist: 'Slow Artist')];
-        },
-      );
+      suggestions.script = (_) async {
+        await fetchRelease.future;
+        return [createItem('slow_1', 'Slow Track', artist: 'Slow Artist')];
+      };
 
       final queue = [createSong(1, 'Only Song', artist: 'Seed Artist')];
       playerBloc.add(PlaySongEvent(queue.first, queue: queue));
@@ -347,38 +373,144 @@ void main() {
       expect(played.toSet(), equals({1, 2, 3, 4, 5, 6}));
     });
 
-    test('UserTasteService returns JioSaavn recommendations even when filePath is initially unpopulated', () async {
-      final seedSong = createSong(1, 'Seed Song').copyWith(mediaId: 'direct_seed_123');
+    group('Suggestions wired into the player', () {
+      Song librarySong(int id, String title) => Song(
+            id: id,
+            title: title,
+            artist: 'Local Artist',
+            album: 'Local Album',
+            filePath: '/music/$id.mp3',
+            duration: const Duration(minutes: 3),
+            dateModified: DateTime.now(),
+            source: 'local',
+          );
 
-      final tasteService = UserTasteService(
-        clock: () => DateTime.now(),
-        fetchSuggestions: (id, {limit = 10}) async {
-          expect(id, equals('direct_seed_123'));
-          return [
-            JioSaavnItem(
-              type: 'song',
-              id: 'stream_999',
-              token: 'stream_999',
-              title: 'Online Stream Track',
-              subtitle: 'Online Artist',
-              imageUrl: '',
-              // filePath will be empty string initially
-              directMediaUrl: null,
-              encryptedMediaUrl: null,
-            ),
-          ];
-        },
-      );
+      test('Autoplay asks with the song the user picked and the song playing as seeds', () async {
+        final queue = [
+          createSong(1, 'Picked Song', artist: 'Seed Artist'),
+          createSong(2, 'Second Song', artist: 'Seed Artist'),
+        ];
+        playerBloc.add(PlayQueueEvent(queue, initialIndex: 0));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 1)),
+        );
+        playerBloc.add(const NextSongEvent()); // now on the last song: Autoplay fills the queue
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 2)),
+        );
+        expect(suggestions.asked, isNotEmpty);
+        expect(suggestions.asked.first.title, 'Picked Song'); // the anchor leads
+        expect(suggestions.asked.map((a) => a.title), contains('Second Song')); // plus what is playing
+      });
 
-      final recs = await tasteService.getRecommendations(
-        context: RecommendationContext.autoplay,
-        currentSong: seedSong,
-        queue: [seedSong],
-      );
+      test('Autoplay uses up to 5 songs of the queue as seeds, the picked song first', () async {
+        final queue = [for (var i = 1; i <= 8; i++) createSong(i, 'Queue Song $i', artist: 'Artist $i')];
+        playerBloc.add(PlayQueueEvent(queue, initialIndex: 7)); // start on the last song
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 8)),
+        );
+        final titles = suggestions.asked.map((a) => a.title).toList();
+        expect(titles.toSet(), hasLength(5));
+        expect(titles.first, 'Queue Song 8'); // the song the user picked leads
+        // then the songs played just before it, nearest first
+        expect(titles.toSet(), {'Queue Song 8', 'Queue Song 7', 'Queue Song 6', 'Queue Song 5', 'Queue Song 4'});
+      });
 
-      expect(recs, isNotEmpty);
-      expect(recs.first.title, equals('Online Stream Track'));
-      expect(recs.first.source, equals('jiosaavn'));
+      test('with fewer songs in the queue, Autoplay uses what there is', () async {
+        final queue = [createSong(1, 'Only A'), createSong(2, 'Only B')];
+        playerBloc.add(PlayQueueEvent(queue, initialIndex: 1));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 2)),
+        );
+        expect(suggestions.asked.map((a) => a.title).toSet(), {'Only B', 'Only A'});
+      });
+
+      test('songs Autoplay added itself are not used as seeds on the next refill', () async {
+        final queue = [createSong(1, 'User Song', artist: 'Seed Artist')];
+        playerBloc.add(PlayQueueEvent(queue, initialIndex: 0));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 1)),
+        );
+        suggestions.asked.clear();
+        suggestions.script = (_) async => [createItem('n1', 'Second Wave', artist: 'Other')];
+        playerBloc.add(const NextSongEvent()); // moves onto an Autoplay song
+        await Future.delayed(const Duration(milliseconds: 300));
+        playerBloc.add(const AutoExpandQueueEvent());
+        await Future.delayed(const Duration(milliseconds: 300));
+        final seeds = suggestions.asked.map((a) => a.title);
+        expect(seeds, isNot(contains('Infinite Track 1')));
+        expect(seeds, isNot(contains('Infinite Track 2')));
+      });
+
+      test('a Stream song that starts playing warms up the slow suggestion sources', () async {
+        final song = createSong(1, 'Warm Me', artist: 'Some Artist');
+        playerBloc.add(PlaySongEvent(song, queue: [song]));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 1)),
+        );
+        expect(suggestions.warmed.map((w) => w.title), contains('Warm Me'));
+      });
+
+      test('a Library song does not start any suggestion lookups', () async {
+        final song = librarySong(5, 'Local Song');
+        playerBloc.add(PlaySongEvent(song, queue: [song]));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 5)),
+        );
+        await Future.delayed(const Duration(milliseconds: 100));
+        expect(suggestions.warmed, isEmpty);
+        expect(suggestions.asked, isEmpty);
+      });
+
+      test('Radio uses the radio service and queues what it suggests after the current song', () async {
+        final radio = ScriptedProvider()
+          ..script = (_) async => [
+                createItem('r1', 'Radio Track 1', artist: 'Radio Artist 1'),
+                createItem('r2', 'Radio Track 2', artist: 'Radio Artist 2'),
+              ];
+        final bloc = PlayerBloc(
+          audioService: MockAudioPlayerService(),
+          suggestionService: SuggestionService(providers: [suggestions], resolver: JioResolver(search: (q) async => const [])),
+          radioSuggestionService: SuggestionService(providers: [radio], resolver: JioResolver(search: (q) async => const [])),
+        );
+        addTearDown(bloc.close);
+
+        final song = createSong(1, 'Current Song', artist: 'Some Artist');
+        bloc.add(StartRadioEvent(song));
+        await expectLater(
+          bloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length == 3)),
+        );
+        final queue = (bloc.state as PlayerPlaying).queue;
+        expect(queue.map((s) => s.title), ['Current Song', 'Radio Track 1', 'Radio Track 2']);
+        expect(radio.asked.single.title, 'Current Song');
+        expect(suggestions.asked, isEmpty); // the Autoplay service was not used
+      });
+
+      test('suggestions that are already in the queue are not added again', () async {
+        suggestions.script = (_) async => [
+              createItem('x1', 'Already Queued', artist: 'Seed Artist'),
+              createItem('x2', 'Fresh Track', artist: 'Another Artist'),
+            ];
+        final queue = [
+          createSong(1, 'Already Queued', artist: 'Seed Artist'),
+        ];
+        playerBloc.add(PlayQueueEvent(queue, initialIndex: 0));
+        await expectLater(
+          playerBloc.stream,
+          emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 1)),
+        );
+        final titles = (playerBloc.state as PlayerPlaying).queue.map((s) => s.title).toList();
+        expect(titles.where((t) => t == 'Already Queued'), hasLength(1));
+        expect(titles, contains('Fresh Track'));
+      });
     });
   });
 }
