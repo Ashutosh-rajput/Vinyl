@@ -242,9 +242,7 @@ class _MiniPlayerDock extends StatelessWidget {
         return GestureDetector(
           onTap: () {
             Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => PlayerScreen(song: song),
-              ),
+              PlayerScreen.route(song),
             );
           },
           child: Column(
@@ -252,6 +250,7 @@ class _MiniPlayerDock extends StatelessWidget {
             children: [
               // Swipe the bar: left = next song, right = previous.
               SwipeToSkip(
+                contentKey: song.id,
                 maxTravel: 90,
                 child: Container(
                 height: 60,

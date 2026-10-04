@@ -317,9 +317,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                   PlaySongEvent(song, queue: songs),
                                 );
                             Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => PlayerScreen(song: song),
-                              ),
+                              PlayerScreen.route(song),
                             );
                           },
                         );
@@ -391,7 +389,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       .read<PlayerBloc>()
                       .add(PlaySongEvent(song, queue: localSongs));
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => PlayerScreen(song: song)),
+                    PlayerScreen.route(song),
                   );
                 },
               )),

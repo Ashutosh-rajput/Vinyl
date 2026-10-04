@@ -133,7 +133,7 @@ void main() {
           find.ancestor(of: sliderFinder, matching: find.byType(SliderTheme)),
         );
         final activeTrack = sliderTheme.data.trackShape as WavySliderTrackShape;
-        expect(sliderTheme.data.thumbShape, isA<WavyHandleSliderThumbShape>());
+        expect(sliderTheme.data.thumbShape, isA<SnakeHeadSliderThumbShape>());
         expect(activeTrack.isPlaying, isTrue);
         expect(activeTrack.amplitude, closeTo(1.0, 0.01));
 
@@ -212,6 +212,133 @@ void main() {
 
       testWidgets('a tiny drag does nothing and the disc springs back', (tester) async {
         expect(await titleAfterSwipe(tester, const Offset(-20, 0)), 'Track 2');
+      });
+    });
+
+    group('Swipe down to minimise', () {
+      final song = Song(
+        id: 7, title: 'Mini Song', artist: 'Artist', album: 'Album',
+        filePath: '/music/mini.mp3', duration: const Duration(seconds: 200),
+        dateModified: DateTime.now());
+
+      Future<void> pumpHost(WidgetTester tester) async {
+        await tester.pumpWidget(
+          MultiBlocProvider(
+            providers: [
+              BlocProvider<PlayerBloc>.value(value: playerBloc),
+              BlocProvider<LibraryBloc>.value(value: libraryBloc),
+            ],
+            child: MaterialApp(
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).push(PlayerScreen.route(song)),
+                      child: const Text('open player'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      Future<void> openPlayer(WidgetTester tester) async {
+        await pumpHost(tester);
+        await tester.tap(find.text('open player'));
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsOneWidget);
+      }
+
+      // Many small moves with real timestamps, like a finger.
+      Future<TestGesture> dragDown(WidgetTester tester, double dy, {int msPerStep = 16}) async {
+        final gesture = await tester.startGesture(const Offset(400, 250));
+        final steps = (dy.abs() / 10).ceil();
+        for (var i = 0; i < steps; i++) {
+          await gesture.moveBy(Offset(0, dy.sign * 10), timeStamp: Duration(milliseconds: msPerStep * (i + 1)));
+          await tester.pump(Duration(milliseconds: msPerStep));
+        }
+        return gesture;
+      }
+
+      double playerTop(WidgetTester tester) => tester.getTopLeft(find.byType(PlayerScreen)).dy;
+
+      testWidgets('the player slides up from the bottom when opened', (tester) async {
+        await pumpHost(tester);
+        await tester.tap(find.text('open player'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(playerTop(tester), greaterThan(150)); // still on its way up
+        await tester.pumpAndSettle();
+        expect(playerTop(tester), closeTo(0, 0.5));
+      });
+
+      testWidgets('the screen follows the finger while dragging down', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 200);
+        expect(playerTop(tester), greaterThan(100));
+        await gesture.up();
+        await tester.pumpAndSettle();
+      });
+
+      testWidgets('a long drag down closes the player into the screen below', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 450, msPerStep: 40); // slow, far
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsNothing);
+        expect(find.text('open player'), findsOneWidget);
+      });
+
+      testWidgets('a short quick flick down also closes it', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 90, msPerStep: 6); // short but fast
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsNothing);
+      });
+
+      testWidgets('a short slow drag springs back and the player stays open', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 60, msPerStep: 60);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsOneWidget);
+        expect(playerTop(tester), closeTo(0, 0.5));
+      });
+
+      testWidgets('dragging down and then back up before releasing keeps it open', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 300, msPerStep: 60);
+        for (var i = 0; i < 30; i++) {
+          await gesture.moveBy(const Offset(0, -10), timeStamp: Duration(milliseconds: 2000 + 60 * i));
+          await tester.pump(const Duration(milliseconds: 60));
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsOneWidget);
+      });
+
+      testWidgets('the chevron button closes it with the same slide down', (tester) async {
+        await openPlayer(tester);
+        await tester.tap(find.byIcon(Icons.keyboard_arrow_down_rounded));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 120));
+        expect(playerTop(tester), greaterThan(50)); // sliding down, not vanished
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsNothing);
+      });
+
+      testWidgets('after minimising, the player can be opened again', (tester) async {
+        await openPlayer(tester);
+        final gesture = await dragDown(tester, 450, msPerStep: 40);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('open player'));
+        await tester.pumpAndSettle();
+        expect(find.byType(PlayerScreen), findsOneWidget);
+        expect(playerTop(tester), closeTo(0, 0.5));
       });
     });
 });

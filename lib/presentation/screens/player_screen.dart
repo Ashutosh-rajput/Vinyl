@@ -28,8 +28,85 @@ class PlayerScreen extends StatefulWidget {
 
   const PlayerScreen({required this.song, super.key});
 
+  /// The full player slides up from the bottom (where the mini player sits)
+  /// and slides back down into it. While the user drags it down, the slide
+  /// follows the finger exactly.
+  static Route<void> route(Song song) => _PlayerRoute(song);
+
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+/// The slide-up route of the full player. It is a subclass so the swipe-down
+/// gesture can reach the route's animation controller (it is protected).
+class _PlayerRoute extends PageRouteBuilder<void> {
+  _PlayerRoute(Song song)
+      : super(
+          settings: const RouteSettings(name: 'player'),
+          transitionDuration: const Duration(milliseconds: 380),
+          reverseTransitionDuration: const Duration(milliseconds: 300),
+          pageBuilder: (_, __, ___) => PlayerScreen(song: song),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            // Linear while a finger is driving it, eased otherwise.
+            final dragging = ModalRoute.of(context)?.navigator?.userGestureInProgress ?? false;
+            final position = dragging
+                ? animation
+                : CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                    reverseCurve: Curves.easeInCubic,
+                  );
+            return SlideTransition(
+              position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(position),
+              child: child,
+            );
+          },
+        );
+
+  AnimationController? get dragController => controller;
+}
+
+/// Drives the player route's own animation from a downward drag, so the screen
+/// follows the finger and then either finishes sliding down into the mini
+/// player or springs back (the same technique iOS uses for its back swipe).
+class _PlayerDismissDrag {
+  final NavigatorState navigator;
+  final AnimationController controller;
+
+  _PlayerDismissDrag(this.navigator, this.controller) {
+    navigator.didStartUserGesture();
+  }
+
+  /// [fraction] = how far the finger moved, as a fraction of screen height.
+  void update(double fraction) {
+    controller.value -= fraction;
+  }
+
+  /// [velocity] = screen heights per second; positive means downward.
+  void end(double velocity) {
+    const settle = Duration(milliseconds: 260);
+    final close = velocity.abs() > 1.0 ? velocity > 0 : controller.value < 0.7;
+
+    if (close) {
+      navigator.pop();
+      if (controller.isAnimating) {
+        controller.animateBack(0.0, duration: settle, curve: Curves.easeOutCubic);
+      }
+    } else {
+      controller.animateTo(1.0, duration: settle, curve: Curves.easeOutCubic);
+    }
+
+    if (controller.isAnimating) {
+      late AnimationStatusListener listener;
+      listener = (status) {
+        controller.removeStatusListener(listener);
+        navigator.didStopUserGesture();
+      };
+      controller.addStatusListener(listener);
+    } else {
+      navigator.didStopUserGesture();
+    }
+  }
 }
 
 class _PlayerScreenState extends State<PlayerScreen>
@@ -41,6 +118,31 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _dragPosition = 0.0;
   bool _showLyrics = false;
   final GlobalKey<LyricsViewState> _lyricsKey = GlobalKey<LyricsViewState>();
+
+  // Swipe-down-to-minimise: drives this route's slide animation by hand.
+  _PlayerDismissDrag? _dismissDrag;
+
+  void _onDismissStart(DragStartDetails details) {
+    final route = ModalRoute.of(context);
+    if (route is! _PlayerRoute || route.dragController == null || !route.isCurrent) return;
+    _dismissDrag = _PlayerDismissDrag(Navigator.of(context), route.dragController!);
+  }
+
+  void _onDismissUpdate(DragUpdateDetails details) {
+    final height = MediaQuery.sizeOf(context).height;
+    _dismissDrag?.update((details.primaryDelta ?? 0) / height);
+  }
+
+  void _onDismissEnd(DragEndDetails details) {
+    final height = MediaQuery.sizeOf(context).height;
+    _dismissDrag?.end((details.primaryVelocity ?? 0) / height);
+    _dismissDrag = null;
+  }
+
+  void _onDismissCancel() {
+    _dismissDrag?.end(0);
+    _dismissDrag = null;
+  }
 
   @override
   void initState() {
@@ -189,7 +291,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           if (mounted) _syncAnimation(state);
         });
 
-        return Scaffold(
+        final screen = Scaffold(
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
@@ -285,6 +387,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           },
                           // Swipe the disc: left = next song, right = previous.
                           child: SwipeToSkip(
+                            contentKey: currentSong.id,
                             child: Center(
                             child: RotationTransition(
                               turns: _rotationController,
@@ -481,7 +584,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                                   isPlaying: waving,
                                   amplitude: amplitude,
                                 ),
-                                thumbShape: const WavyHandleSliderThumbShape(),
+                                thumbShape: SnakeHeadSliderThumbShape(
+                                  thumbRadius: 11.0,
+                                  waveAnimationValue: _waveController.value,
+                                  isPlaying: waving,
+                                ),
                                 overlayShape: SliderComponentShape.noOverlay,
                                 activeTrackColor: theme.colorScheme.primary,
                                 inactiveTrackColor: theme.colorScheme.primary.withValues(alpha: 0.25),
@@ -647,6 +754,16 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
             ], // Stack children
           ), // Stack
+        );
+
+        // Swipe down anywhere to minimise into the mini player.
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onVerticalDragStart: _onDismissStart,
+          onVerticalDragUpdate: _onDismissUpdate,
+          onVerticalDragEnd: _onDismissEnd,
+          onVerticalDragCancel: _onDismissCancel,
+          child: screen,
         );
       },
     );

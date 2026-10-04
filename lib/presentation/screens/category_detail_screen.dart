@@ -98,9 +98,7 @@ class CategoryDetailScreen extends StatelessWidget {
                               PlaySongEvent(shuffled.first, queue: shuffled),
                             );
                         Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PlayerScreen(song: shuffled.first),
-                          ),
+                          PlayerScreen.route(shuffled.first),
                         );
                       },
                     ),
@@ -113,9 +111,7 @@ class CategoryDetailScreen extends StatelessWidget {
                               PlaySongEvent(songs.first, queue: songs),
                             );
                         Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => PlayerScreen(song: songs.first),
-                          ),
+                          PlayerScreen.route(songs.first),
                         );
                       },
                     ),
@@ -188,9 +184,7 @@ class CategoryDetailScreen extends StatelessWidget {
                                 PlaySongEvent(song, queue: songs),
                               );
                           Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => PlayerScreen(song: song),
-                            ),
+                            PlayerScreen.route(song),
                           );
                         },
                       );

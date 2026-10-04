@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 
 /// Material 3 Expressive style progress track for a [Slider].
 ///
-/// The played part is a wavy line that travels along the track while music
-/// plays; the remaining part is a flat rounded line, separated from the played
-/// part by a small gap around the handle, and ends in a small dot. When music
-/// is paused the wave eases out to a straight line.
+/// The played part is a wavy line (the snake's body) that travels along the
+/// track while music plays; the remaining part is a flat rounded line that
+/// starts just in front of the snake's head and ends in a small dot. When
+/// music is paused the wave eases out to a straight line.
 class WavySliderTrackShape extends SliderTrackShape {
   /// Phase of the travelling wave, 0..1 (one full wavelength per cycle).
   final double waveAnimationValue;
@@ -19,17 +19,20 @@ class WavySliderTrackShape extends SliderTrackShape {
   /// the wave in and out.
   final double amplitude;
 
+  /// Radius of the snake head the track connects to.
+  final double headRadius;
+
   const WavySliderTrackShape({
     required this.waveAnimationValue,
     required this.isPlaying,
     this.amplitude = 1.0,
+    this.headRadius = 11.0,
   });
 
   static const double _strokeWidth = 4.5;
   static const double _inactiveStrokeWidth = 4.0;
   static const double _waveHeight = 3.2;
   static const double _wavelength = 36.0;
-  static const double _gap = 7.0;
   static const double _stopDotRadius = 2.0;
 
   @override
@@ -72,8 +75,10 @@ class WavySliderTrackShape extends SliderTrackShape {
     final cy = rect.center.dy;
     final left = rect.left + _strokeWidth / 2;
     final right = rect.right - _strokeWidth / 2;
-    final activeEnd = thumbCenter.dx - _gap;
-    final inactiveStart = thumbCenter.dx + _gap;
+    // The wavy body runs into the back of the snake's head; the flat
+    // remainder starts a little in front of its nose.
+    final activeEnd = thumbCenter.dx - headRadius * 0.55;
+    final inactiveStart = thumbCenter.dx + headRadius * 1.2 + 5;
 
     // Remaining (flat) part, with a stop dot at its end.
     if (inactiveStart < right) {
@@ -119,16 +124,24 @@ class WavySliderTrackShape extends SliderTrackShape {
   }
 }
 
-/// Material 3 Expressive slider handle: a slim vertical rounded bar that
-/// narrows slightly while it is being dragged.
-class WavyHandleSliderThumbShape extends SliderComponentShape {
-  final double height;
-  final double width;
+/// The snake head that rides at the end of the wavy body: the seek handle.
+///
+/// Its tail is the wavy track painted by [WavySliderTrackShape].
+class SnakeHeadSliderThumbShape extends SliderComponentShape {
+  final double thumbRadius;
+  final double waveAnimationValue;
+  final bool isPlaying;
 
-  const WavyHandleSliderThumbShape({this.height = 28, this.width = 5});
+  const SnakeHeadSliderThumbShape({
+    this.thumbRadius = 11.0,
+    required this.waveAnimationValue,
+    required this.isPlaying,
+  });
 
   @override
-  Size getPreferredSize(bool isEnabled, bool isDiscrete) => Size(width, height);
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) {
+    return Size.fromRadius(thumbRadius);
+  }
 
   @override
   void paint(
@@ -145,14 +158,94 @@ class WavyHandleSliderThumbShape extends SliderComponentShape {
     required double textScaleFactor,
     required Size sizeWithOverflow,
   }) {
-    final w = width - 2 * activationAnimation.value; // narrows while pressed
-    final rrect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: center, width: w, height: height),
-      Radius.circular(w / 2),
+    final Canvas canvas = context.canvas;
+    final primaryColor = sliderTheme.thumbColor ?? Colors.purpleAccent;
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+
+    if (isPlaying) {
+      final tilt = math.sin(waveAnimationValue * 2 * math.pi) * 0.12;
+      canvas.rotate(tilt);
+    }
+
+    // 1. Draw Snake Head Path (pointing forward ->)
+    final headPath = Path();
+    headPath.moveTo(-thumbRadius * 0.8, -thumbRadius * 0.5);
+    headPath.cubicTo(
+      -thumbRadius * 0.2,
+      -thumbRadius * 0.9,
+      thumbRadius * 0.6,
+      -thumbRadius * 0.7,
+      thumbRadius * 1.2,
+      0.0,
     );
-    context.canvas.drawRRect(
-      rrect,
-      Paint()..color = sliderTheme.thumbColor ?? Colors.purpleAccent,
+    headPath.cubicTo(
+      thumbRadius * 0.6,
+      thumbRadius * 0.7,
+      -thumbRadius * 0.2,
+      thumbRadius * 0.9,
+      -thumbRadius * 0.8,
+      thumbRadius * 0.5,
     );
+    headPath.close();
+
+    final headPaint = Paint()
+      ..color = primaryColor
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(headPath, headPaint);
+
+    // 2. Draw Snake Eyes
+    final eyePaint = Paint()
+      ..color = isPlaying ? Colors.white : Colors.black87
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(
+      Offset(thumbRadius * 0.4, -thumbRadius * 0.3),
+      1.8,
+      eyePaint,
+    );
+    canvas.drawCircle(
+      Offset(thumbRadius * 0.4, thumbRadius * 0.3),
+      1.8,
+      eyePaint,
+    );
+
+    if (isPlaying) {
+      final pupilPaint = Paint()
+        ..color = Colors.black
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(
+        Offset(thumbRadius * 0.45, -thumbRadius * 0.3),
+        0.8,
+        pupilPaint,
+      );
+      canvas.drawCircle(
+        Offset(thumbRadius * 0.45, thumbRadius * 0.3),
+        0.8,
+        pupilPaint,
+      );
+
+      // Flickering red tongue when playing
+      final tonguePhase = math.sin(waveAnimationValue * 4 * math.pi);
+      if (tonguePhase > 0.2) {
+        final tonguePaint = Paint()
+          ..color = Colors.redAccent
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4
+          ..strokeCap = StrokeCap.round;
+
+        final tonguePath = Path();
+        tonguePath.moveTo(thumbRadius * 1.2, 0.0);
+        tonguePath.lineTo(thumbRadius * 1.55, 0.0);
+        tonguePath.lineTo(thumbRadius * 1.75, -thumbRadius * 0.22);
+        tonguePath.moveTo(thumbRadius * 1.55, 0.0);
+        tonguePath.lineTo(thumbRadius * 1.75, thumbRadius * 0.22);
+
+        canvas.drawPath(tonguePath, tonguePaint);
+      }
+    }
+
+    canvas.restore();
   }
 }

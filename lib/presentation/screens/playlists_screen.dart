@@ -108,9 +108,7 @@ class PlaylistsScreen extends StatelessWidget {
                                 PlaySongEvent(favoritesPlaylist.songs.first, queue: favoritesPlaylist.songs),
                               );
                           Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => PlayerScreen(song: favoritesPlaylist.songs.first),
-                            ),
+                            PlayerScreen.route(favoritesPlaylist.songs.first),
                           );
                         }
                       },
@@ -270,9 +268,7 @@ class PlaylistsScreen extends StatelessWidget {
                                         PlaySongEvent(playlist.songs.first, queue: playlist.songs),
                                       );
                                   Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => PlayerScreen(song: playlist.songs.first),
-                                    ),
+                                    PlayerScreen.route(playlist.songs.first),
                                   );
                                 },
                               ),
@@ -333,9 +329,7 @@ class PlaylistsScreen extends StatelessWidget {
                                           PlaySongEvent(song, queue: playlist.songs),
                                         );
                                     Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => PlayerScreen(song: song),
-                                      ),
+                                      PlayerScreen.route(song),
                                     );
                                   },
                                 );
