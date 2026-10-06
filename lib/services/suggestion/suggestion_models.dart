@@ -3,8 +3,8 @@ import 'package:vinyl/data/models/jiosaavn_item.dart';
 import 'package:vinyl/data/models/song_model.dart';
 
 /// Where a suggestion came from. The order is the priority order: the engine
-/// prefers MetaBrainz, then YouTube, then JioSaavn.
-enum SuggestionSource { metaBrainz, youtube, jioSaavn }
+/// prefers MetaBrainz, then Deezer, then YouTube, then JioSaavn.
+enum SuggestionSource { metaBrainz, deezer, youtube, jioSaavn }
 
 extension SuggestionSourcePriority on SuggestionSource {
   /// Base score of a suggestion from this source. The gap between tiers is
@@ -12,6 +12,7 @@ extension SuggestionSourcePriority on SuggestionSource {
   /// source always comes first unless several sources agree on a song.
   double get tierScore => switch (this) {
         SuggestionSource.metaBrainz => 3.0,
+        SuggestionSource.deezer => 2.5,
         SuggestionSource.youtube => 2.0,
         SuggestionSource.jioSaavn => 1.0,
       };

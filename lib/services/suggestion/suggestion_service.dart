@@ -8,6 +8,7 @@ import 'package:vinyl/data/models/jiosaavn_item.dart';
 import 'package:vinyl/services/suggestion/jio_resolver.dart';
 import 'package:vinyl/services/suggestion/providers/jiosaavn_provider.dart';
 import 'package:vinyl/services/suggestion/providers/metabrainz_provider.dart';
+import 'package:vinyl/services/suggestion/providers/deezer_provider.dart';
 import 'package:vinyl/services/suggestion/providers/youtube_provider.dart';
 import 'package:vinyl/services/suggestion/suggestion_models.dart';
 import 'package:vinyl/services/suggestion/suggestion_provider.dart';
@@ -64,7 +65,7 @@ class SuggestionService {
     this.tasteBoost,
   });
 
-  /// The standard setup: MetaBrainz, YouTube and JioSaavn sharing one matcher.
+  /// The standard setup: MetaBrainz, Deezer, YouTube and JioSaavn sharing one matcher.
   ///
   /// [includeArtistSongs] also adds the seed's credited artists' other songs
   /// (used by Radio). Pass the same [metaBrainz] and [resolver] to every
@@ -83,6 +84,7 @@ class SuggestionService {
       tasteBoost: tasteBoost,
       providers: [
         metaBrainz ?? MetaBrainzProvider(),
+        DeezerProvider(),
         YoutubeProvider(),
         JioSaavnProvider(resolver: jioResolver, includeArtistSongs: includeArtistSongs, languageOf: language),
       ],
