@@ -19,17 +19,10 @@ class SupportBannerWidget extends StatefulWidget {
 }
 
 class _SupportBannerWidgetState extends State<SupportBannerWidget> {
-  bool _visible = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _visible = getIt<SettingsService>().shouldShowSupportBanner;
-  }
+  final ValueNotifier<bool> _visible = getIt<SettingsService>().supportBannerVisible;
 
   Future<void> _openGitHubRepo() async {
     getIt<SettingsService>().dismissSupportBanner();
-    setState(() => _visible = false);
     widget.onDismissed?.call();
     const urlString = 'https://github.com/Ashutosh-rajput/Vinyl';
     final url = Uri.parse(urlString);
@@ -52,14 +45,21 @@ class _SupportBannerWidgetState extends State<SupportBannerWidget> {
   }
 
   void _dismiss() {
-    setState(() => _visible = false);
     getIt<SettingsService>().dismissSupportBanner();
     widget.onDismissed?.call();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
+    // Follows the setting live: switching the banner on in Settings shows it
+    // here at once, even though this screen was built earlier.
+    return ValueListenableBuilder<bool>(
+      valueListenable: _visible,
+      builder: (context, visible, _) => visible ? _buildBanner(context) : const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildBanner(BuildContext context) {
 
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;

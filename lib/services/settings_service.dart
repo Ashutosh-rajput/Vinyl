@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vinyl/data/repositories/music_repository.dart';
@@ -97,6 +98,10 @@ class SettingsService {
   bool get supportBannerDismissed => _prefs.getBool(_keySupportBannerDismissed) ?? false;
   bool get isSupportBannerEnabled => !supportBannerDismissed;
   bool get shouldShowSupportBanner => !supportBannerDismissed;
+
+  /// Whether the GitHub support banner is showing. Banners already on screen
+  /// listen to this, so changing the setting takes effect at once.
+  late final ValueNotifier<bool> supportBannerVisible = ValueNotifier<bool>(shouldShowSupportBanner);
   bool get hasSeenAppIntro => _prefs.getBool(_keyHasSeenAppIntro) ?? false;
   Future<void> setHasSeenAppIntro(bool value) => _prefs.setBool(_keyHasSeenAppIntro, value);
   bool get autoPlayNext => _prefs.getBool(_keyAutoPlayNext) ?? true;
@@ -189,9 +194,11 @@ class SettingsService {
   }
   Future<void> dismissSupportBanner() async {
     await _prefs.setBool(_keySupportBannerDismissed, true);
+    supportBannerVisible.value = false;
   }
   Future<void> setSupportBannerEnabled(bool enabled) async {
     await _prefs.setBool(_keySupportBannerDismissed, !enabled);
+    supportBannerVisible.value = enabled;
   }
   Future<void> setLastPlayedSongId(int? id) async {
     if (id != null) {
