@@ -143,7 +143,24 @@ class _SwipeToSkipState extends State<SwipeToSkip> with SingleTickerProviderStat
     _contentChanged = null;
   }
 
+  /// True while the current drag began in the back-gesture zone; it is ignored.
+  bool _fromEdge = false;
+
+  bool _startsAtEdge(double x) {
+    final media = MediaQuery.of(context);
+    // The system reports how wide its gesture zone is; keep a sensible minimum
+    // for phones that report none.
+    final inset = media.systemGestureInsets;
+    final left = inset.left < 28 ? 28.0 : inset.left;
+    final right = inset.right < 28 ? 28.0 : inset.right;
+    return x <= left || x >= media.size.width - right;
+  }
+
   void _onDragEnd(DragEndDetails details) {
+    if (_fromEdge) {
+      _fromEdge = false;
+      return;
+    }
     if (_busy) return;
     final travelled = _dragX.value;
     final velocity = details.primaryVelocity ?? 0;
@@ -166,14 +183,19 @@ class _SwipeToSkipState extends State<SwipeToSkip> with SingleTickerProviderStat
         if (constraints.hasBoundedWidth) _width = constraints.maxWidth;
         return GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onHorizontalDragStart: (_) {
+          onHorizontalDragStart: (d) {
+            // A drag that begins at the screen edge is the phone's back
+            // gesture, not a skip: leave it to the system.
+            _fromEdge = _startsAtEdge(d.globalPosition.dx);
+            if (_fromEdge) return;
             if (!_busy) _anim.stop(); // grab a tile that is still springing back
           },
           onHorizontalDragUpdate: (d) {
-            if (_busy) return;
+            if (_busy || _fromEdge) return;
             _dragX.value = (_dragX.value + d.delta.dx).clamp(-widget.maxTravel, widget.maxTravel);
           },
           onHorizontalDragCancel: () {
+            _fromEdge = false;
             if (!_busy) _slideTo(0, const Duration(milliseconds: 220), Curves.easeOut);
           },
           onHorizontalDragEnd: _onDragEnd,

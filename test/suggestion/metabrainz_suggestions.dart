@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:dio/dio.dart';
 
 /// Suggestion service using MetaBrainz (MusicBrainz + ListenBrainz collaborative filtering).

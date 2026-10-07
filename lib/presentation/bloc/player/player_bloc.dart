@@ -909,9 +909,18 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     try {
       final allSongs = await _repository.getAllSongs();
       if (superseded()) return;
-      final songMatches = allSongs.where((s) => s.id == lastId);
-      if (songMatches.isEmpty) return;
-      final song = songMatches.first;
+      var song = allSongs.where((s) => s.id == lastId).firstOrNull;
+
+      // A song that was streamed is not part of the Library (getAllSongs skips
+      // those), so it is looked for in the stream history instead.
+      if (song == null) {
+        final streamed = await _repository.getLastPlayedStreamSongs(limit: 10);
+        if (superseded()) return;
+        song = streamed.where((s) => s.id == lastId).firstOrNull;
+        if (song != null) song = await _withFreshStreamLink(song);
+        if (superseded()) return;
+      }
+      if (song == null) return;
 
       final posMs = _settingsService?.lastPlayedPositionMs ?? 0;
       final pos = Duration(milliseconds: posMs);
@@ -937,6 +946,22 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         queue: _queue,
       ));
     } catch (_) {}
+  }
+
+  /// A streamed song restored after a restart: its saved link may have
+  /// expired, so it is played from the offline cache when it is there, and
+  /// otherwise gets a fresh link from JioSaavn.
+  Future<Song> _withFreshStreamLink(Song song) async {
+    final cached = StreamCacheService.instance.getCachedFilePath(song.id);
+    if (cached != null && File(cached).existsSync()) return song.copyWith(filePath: cached);
+    if (song.source != 'jiosaavn') return song;
+    try {
+      final key = (song.mediaId != null && song.mediaId!.isNotEmpty) ? song.mediaId! : song.id.toString();
+      final details = await JioSaavnDecoder.fetchSongDetails(key);
+      final url = details?.directMediaUrl ?? JioSaavnDecoder.decryptMediaUrl(details?.encryptedMediaUrl);
+      if (url != null && url.isNotEmpty) return song.copyWith(filePath: url);
+    } catch (_) {}
+    return song;
   }
 
   Future<void> _onSetVolume(SetVolumeEvent event, Emitter<PlayerState> emit) async {

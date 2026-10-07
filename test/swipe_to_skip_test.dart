@@ -101,6 +101,19 @@ void main() {
     await settle(tester);
   });
 
+  testWidgets('a drag that starts at the screen edge is the back gesture and skips nothing', (tester) async {
+    tester.view.physicalSize = const Size(300, 600); // the bar fills the screen width
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await pumpBar(tester);
+    final gesture = await tester.startGesture(Offset(5, tester.getCenter(bar).dy)); // at the left edge
+    await moveInSteps(tester, gesture, 200);
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(bloc.events, isEmpty);
+    expect(barX(tester), moreOrLessEquals(tester.getTopLeft(bar).dx));
+  });
+
   testWidgets('swipe right asks for the previous song', (tester) async {
     await pumpBar(tester);
     await swipe(tester, 150);
