@@ -542,11 +542,8 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
         if (mounted) _loadLastPlayedSongs();
       });
 
-
-      _startHomeSuggestions(seeds: [
-        SeedSong.fromSong(song),
-        ...UserTasteService.instance.topSeedSongs(limit: 2),
-      ]);
+      // The suggestion list is left as it is: rebuilding it on every tap
+      // reshuffles the screen under the user and is expensive.
 
       if (getIt<SettingsService>().autoDownloadStreamSongs) {
         _downloadSong(item, overrideUrl: streamUrl);
