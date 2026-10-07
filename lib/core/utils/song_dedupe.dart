@@ -54,8 +54,15 @@ final RegExp _artistSplit = RegExp(
 /// Words that, at the start of a bracketed title suffix, only describe where
 /// the listing comes from, not a different version of the song.
 final RegExp _labelSuffix = RegExp(
-  r'^(from|feat|ft|featuring|with|original|ost|official|lyric|lyrics|audio|video|full|film|movie|soundtrack|theme from|title)\b',
+  // "form" is JioSaavn's own typo of "from", seen in real listings.
+  r'^(from|form|feat|ft|featuring|with|original|ost|official|lyric|lyrics|audio|video|full|film|movie|soundtrack|theme from|title)\b',
   caseSensitive: false,
+);
+
+/// Words that mark a different version of a song. A title that only differs
+/// from another by extra words is the same song unless one of these is there.
+final RegExp _versionWord = RegExp(
+  r'\b(remix|lofi|lo|fi|flip|sped|slowed|reverb|instrumental|karaoke|acoustic|unplugged|live|cover|reprise|mashup|mix|edit|version|jhankar|female|male|duet|rock|dj|bass|8d|remastered|extended|short|unreleased|demo|cut)\b',
 );
 
 /// Normalises a title so two listings of one song compare equal.
@@ -108,12 +115,47 @@ class SongFingerprint {
   /// Duration alone is only trusted this tightly when the artists differ.
   static const int _creditMismatchToleranceSecs = 2;
 
+  /// Length gap allowed when the titles differ by extra words.
+  static const int _extraWordsToleranceSecs = 3;
+
+  /// How many extra words a title may carry.
+  static const int _maxExtraWords = 3;
+
+  /// True when the shorter title is the start or the end of the longer one, the
+  /// extra words are few, and none of them marks another version of the song.
+  static bool _differOnlyByPlainWords(String a, String b) {
+    final shorter = a.length <= b.length ? a : b;
+    final longer = identical(shorter, a) ? b : a;
+    final s = shorter.split(' ');
+    final l = longer.split(' ');
+    final extra = l.length - s.length;
+    if (extra < 1 || extra > _maxExtraWords || s.length < 2) return false;
+
+    final atStart = l.sublist(0, s.length).join(' ') == shorter;
+    final atEnd = l.sublist(extra).join(' ') == shorter;
+    if (!atStart && !atEnd) return false;
+
+    final added = atStart ? l.sublist(s.length) : l.sublist(0, extra);
+    return !_versionWord.hasMatch(added.join(' '));
+  }
+
   bool isSameSongAs(SongFingerprint other) {
     if (identity.isNotEmpty && identity == other.identity) return true;
-    if (titleKey.isEmpty || titleKey != other.titleKey) return false;
+    if (titleKey.isEmpty || other.titleKey.isEmpty) return false;
 
     final bothDurationsKnown = durationSecs > 0 && other.durationSecs > 0;
     final durationGap = (durationSecs - other.durationSecs).abs();
+
+    if (titleKey != other.titleKey) {
+      // "Main Phir Bhi Tumko Chaahunga" and "Phir Bhi Tumko Chaahunga": one
+      // title is the other with a few extra words. Only counted as the same
+      // song with hard evidence: a shared artist and (almost) the same length.
+      return bothDurationsKnown &&
+          durationGap <= _extraWordsToleranceSecs &&
+          artists.any(other.artists.contains) &&
+          _differOnlyByPlainWords(titleKey, other.titleKey);
+    }
+
     if (bothDurationsKnown && durationGap > _sameRecordingToleranceSecs) {
       return false; // a different recording that happens to share the title
     }

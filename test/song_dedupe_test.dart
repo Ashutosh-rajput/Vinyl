@@ -104,4 +104,47 @@ void main() {
       expect(albumSuffixOf("A - Kyon Ki - It's Fate"), "Kyon Ki - It's Fate");
     });
   });
+  group('the same recording listed again under a slightly different name', () {
+    SongFingerprint fp(String title, String artist, int secs) =>
+        SongFingerprint.of(identity: '$title|$artist|$secs', title: title, artist: artist, durationSecs: secs);
+    bool same(SongFingerprint a, SongFingerprint b) => a.isSameSongAs(b);
+
+    test('the typo "Form" for "From" in a label is ignored', () {
+      expect(
+        same(fp('Kitni Bechain Hoke (Form "Kasoor")', 'Alka Yagnik, Udit Narayan, Nadeem-Shravan', 445),
+            fp('Kitni Bechain Hoke (From "Kasoor")', 'Alka Yagnik, Udit Narayan', 445)),
+        isTrue,
+      );
+    });
+
+    test('a few extra words in the title, same artists, same length', () {
+      expect(
+        same(fp('Phir Bhi Tumko Chaahunga', 'Arijit Singh, Mithoon', 351),
+            fp('Main Phir Bhi Tumko Chaahunga (From "Half Girlfriend")', 'Arijit Singh, Mithoon', 351)),
+        isTrue,
+      );
+      expect(
+        same(fp('Kesariya Balam', 'Seema Mishra', 474), fp('Kesariya Balam Padharo Mhare', 'Seema Mishra', 472)),
+        isTrue,
+      );
+    });
+
+    test('but a different version stays different, even at the same length', () {
+      expect(same(fp('Raataan Lambiyan', 'Jubin Nautiyal', 230), fp('Raataan Lambiyan (Lofi Flip)', 'Jubin Nautiyal', 230)), isFalse);
+      expect(same(fp('Raja Ko Rani Se', 'Manohari Singh', 300), fp('Raja Ko Rani Se (Instrumental)', 'Manohari Singh', 300)), isFalse);
+      expect(same(fp('Tum Hi Ho', 'Arijit Singh', 262), fp('Tum Hi Ho Female Version', 'Arijit Singh', 262)), isFalse);
+    });
+
+    test('a similar title by someone else is a different song', () {
+      expect(same(fp('Tum Ho', 'A.R. Rahman', 318), fp('Tum Ho Toh', 'Vishal Mishra', 318)), isFalse);
+    });
+
+    test('extra words with a different length are a different song', () {
+      expect(same(fp('Tum Hi Ho', 'Arijit Singh', 262), fp('Tum Hi Ho Bandhu', 'Arijit Singh', 300)), isFalse);
+    });
+
+    test('a one-word title is never matched by extra words alone', () {
+      expect(same(fp('Kesariya', 'Arijit Singh', 268), fp('Kesariya Tera Ishq', 'Arijit Singh', 268)), isFalse);
+    });
+  });
 }
