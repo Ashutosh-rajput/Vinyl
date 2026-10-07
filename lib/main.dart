@@ -19,6 +19,7 @@ import 'package:vinyl/services/stream_cache_service.dart';
 import 'package:vinyl/services/user_taste_service.dart';
 import 'package:vinyl/services/stream_favorites_service.dart';
 import 'package:vinyl/services/stream_playlists_service.dart';
+import 'package:vinyl/services/lock_lyrics_service.dart';
 import 'package:vinyl/services/settings_service.dart';
 
 import 'package:permission_handler/permission_handler.dart';
@@ -147,6 +148,10 @@ class _PixelPlayerAppState extends State<PixelPlayerApp> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initShareIntentListener();
+    LockLyricsService.instance.attach(
+      _navigatorKey,
+      enabled: getIt.isRegistered<SettingsService>() && getIt<SettingsService>().lockScreenLyrics,
+    );
   }
 
   @override

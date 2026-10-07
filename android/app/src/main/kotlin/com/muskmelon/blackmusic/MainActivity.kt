@@ -1,10 +1,15 @@
 package com.muskmelon.vinyl
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.app.RecoverableSecurityException
+import android.content.BroadcastReceiver
 import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.IntentSender
+import android.view.WindowManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -25,8 +30,127 @@ class MainActivity : AudioServiceActivity() {
     private var pendingUri: Uri? = null
     private var pendingPath: String? = null
 
+    // ---- Lyrics above the lock screen -------------------------------------
+    // While enabled, locking the phone lets this activity stay above the
+    // keyguard (the app then shows only its lyrics screen), and unlocking takes
+    // that back. The activity must be in front when the screen turns off.
+    private var lockChannel: MethodChannel? = null
+    private var lockLyricsEnabled = false
+    private var lockReceiver: BroadcastReceiver? = null
+
+    private fun showOverLockScreen(show: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(show)
+        } else {
+            @Suppress("DEPRECATION")
+            if (show) window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+            else window.clearFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        }
+    }
+
+    private fun setLockLyrics(enabled: Boolean) {
+        lockLyricsEnabled = enabled
+        if (!enabled) {
+            showOverLockScreen(false)
+            lockReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+            lockReceiver = null
+            return
+        }
+        if (lockReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        showOverLockScreen(true)
+                        lockChannel?.invokeMethod("locked", null)
+                    }
+                    Intent.ACTION_USER_PRESENT -> {
+                        showOverLockScreen(false)
+                        lockChannel?.invokeMethod("unlocked", null)
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        registerReceiver(receiver, filter)
+        lockReceiver = receiver
+    }
+
+    private fun isXiaomi(): Boolean {
+        val maker = Build.MANUFACTURER.lowercase()
+        return maker.contains("xiaomi") || maker.contains("redmi") || maker.contains("poco")
+    }
+
+    private fun isVivo(): Boolean {
+        val maker = Build.MANUFACTURER.lowercase()
+        return maker.contains("vivo") || maker.contains("iqoo")
+    }
+
+    /**
+     * The phone maker's own permission page for this app (Xiaomi, Vivo), or the
+     * standard app-info page. Several makers hide "show on lock screen" and
+     * "run in background" there; those pages are not part of Android itself, so
+     * each attempt falls back to the next.
+     */
+    private fun openPermissionPage() {
+        val attempts = mutableListOf<Intent>()
+        if (isXiaomi()) {
+            attempts += Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                putExtra("extra_pkgname", packageName)
+            }
+        }
+        if (isVivo()) {
+            attempts += Intent().apply {
+                setClassName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.PurviewTabActivity")
+                putExtra("packagename", packageName)
+            }
+        }
+        attempts += Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+
+        for (intent in attempts) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        setLockLyrics(false)
+        super.onDestroy()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        lockChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.muskmelon.vinyl/lock_lyrics").also {
+            it.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setEnabled" -> {
+                        setLockLyrics(call.argument<Boolean>("enabled") == true)
+                        result.success(null)
+                    }
+                    "manufacturer" -> result.success(Build.MANUFACTURER.lowercase())
+                    "openPermissions" -> {
+                        openPermissionPage()
+                        result.success(null)
+                    }
+                    "unlock" -> {
+                        // Shows the lock screen's own PIN / pattern / fingerprint prompt.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            (getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager)
+                                .requestDismissKeyguard(this, null)
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DELETE_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method == "deleteAudioFile") {

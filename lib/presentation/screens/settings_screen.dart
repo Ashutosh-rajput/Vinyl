@@ -17,6 +17,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:vinyl/presentation/widgets/update_dialog.dart';
+import 'package:vinyl/services/lock_lyrics_service.dart';
 import 'package:vinyl/services/update_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -35,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _repeatMode;
   late bool _shuffleByDefault;
   late bool _resumeLastSong;
+  late bool _lockScreenLyrics;
   late bool _showPlayerWaveform;
 
   // Download Settings State
@@ -102,6 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _repeatMode = _settingsService.repeatMode;
     _shuffleByDefault = _settingsService.shuffleByDefault;
     _resumeLastSong = _settingsService.resumeLastSong;
+    _lockScreenLyrics = _settingsService.lockScreenLyrics;
     _showPlayerWaveform = _settingsService.showPlayerWaveform;
 
     _downloadFormat = _settingsService.downloadFormat;
@@ -152,6 +155,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
+  }
+
+  /// Many phones keep an app from showing over the lock screen until it is
+  /// allowed in the maker's own settings: say what to switch on for this brand
+  /// and open the app's permission page.
+  Future<void> _askForLockScreenPermission() async {
+    final maker = await LockLyricsService.instance.manufacturer();
+    if (!mounted) return;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Allow lyrics on the lock screen'),
+        content: Text(LockLyricsService.permissionHelp(maker)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Already done')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Open settings')),
+        ],
+      ),
+    );
+    if (open == true) await LockLyricsService.instance.openPermissionSettings();
   }
 
   @override
@@ -249,6 +272,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (val) {
                   setState(() => _resumeLastSong = val);
                   _settingsService.setResumeLastSong(val);
+                },
+              ),
+              _divider(),
+              SwitchListTile(
+                title: _tileTitle('Lyrics on Lock Screen'),
+                subtitle: _tileSubtitle('Locking the phone while the app is open shows the lyrics full screen'),
+                value: _lockScreenLyrics,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _lockScreenLyrics = val);
+                  _settingsService.setLockScreenLyrics(val);
+                  LockLyricsService.instance.setEnabled(val);
+                  if (val) _askForLockScreenPermission();
                 },
               ),
             ],

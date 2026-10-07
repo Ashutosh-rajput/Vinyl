@@ -39,6 +39,7 @@ class SettingsService {
   static const _keyRepeatMode = 'setting_repeat_mode';
   static const _keyShuffleByDefault = 'setting_shuffle_default';
   static const _keyResumeLastSong = 'setting_resume_last';
+  static const _keyLockScreenLyrics = 'setting_lock_screen_lyrics';
   static const _keyDefaultVolume = 'setting_default_volume';
   static const _keyDownloadQuality = 'setting_download_quality';
   static const _keyDownloadFormat = 'setting_download_format';
@@ -104,6 +105,10 @@ class SettingsService {
   String get repeatMode => _prefs.getString(_keyRepeatMode) ?? 'Off';
   bool get shuffleByDefault => _prefs.getBool(_keyShuffleByDefault) ?? false;
   bool get resumeLastSong => _prefs.getBool(_keyResumeLastSong) ?? true;
+
+  /// Show the synced lyrics above the lock screen while a song plays.
+  bool get lockScreenLyrics => _prefs.getBool(_keyLockScreenLyrics) ?? false;
+  Future<void> setLockScreenLyrics(bool value) => _prefs.setBool(_keyLockScreenLyrics, value);
   double get defaultVolume => _prefs.getDouble(_keyDefaultVolume) ?? 0.8;
   String get downloadQuality =>
       _prefs.getString(_keyDownloadQuality) ?? 'Best';
