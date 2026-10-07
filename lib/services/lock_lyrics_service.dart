@@ -22,6 +22,11 @@ class LockLyricsService {
 
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _enabled = false;
+
+  /// Whether the main player is open with its lyrics switched on. The lock
+  /// screen shows lyrics only then: a player showing the album art has not
+  /// asked for them.
+  bool lyricsShownInPlayer = false;
   Route<void>? _route;
 
   /// Connects the service to the app's navigator and applies the saved setting.
@@ -105,12 +110,29 @@ class LockLyricsService {
     return null;
   }
 
+  /// The lock screen shows lyrics only when the setting is on, a song is
+  /// playing (a paused or stopped player has nothing to follow), and the main
+  /// player has its lyrics switched on.
+  @visibleForTesting
+  static bool shouldShow({
+    required bool enabled,
+    required bool lyricsShownInPlayer,
+    required bool playing,
+    required bool alreadyShowing,
+  }) =>
+      enabled && lyricsShownInPlayer && playing && !alreadyShowing;
+
   void _open() {
-    if (!_enabled || _route != null) return;
     final navigator = _navigatorKey?.currentState;
     if (navigator == null || !getIt.isRegistered<PlayerBloc>()) return;
-    // Only while music is playing: a paused or stopped player has nothing to follow.
-    if (getIt<PlayerBloc>().state is! PlayerPlaying) return;
+    if (!shouldShow(
+      enabled: _enabled,
+      lyricsShownInPlayer: lyricsShownInPlayer,
+      playing: getIt<PlayerBloc>().state is PlayerPlaying,
+      alreadyShowing: _route != null,
+    )) {
+      return;
+    }
 
     final route = PageRouteBuilder<void>(
       opaque: true,

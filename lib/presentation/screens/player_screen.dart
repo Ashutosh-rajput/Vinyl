@@ -12,6 +12,7 @@ import 'package:vinyl/presentation/bloc/player/player_event.dart';
 import 'package:vinyl/presentation/bloc/player/player_state.dart';
 import 'package:vinyl/core/di/injection_container.dart';
 import 'package:vinyl/services/audio_service.dart';
+import 'package:vinyl/services/lock_lyrics_service.dart';
 import 'package:vinyl/services/settings_service.dart';
 import 'package:vinyl/presentation/widgets/album_art_widget.dart';
 import 'package:vinyl/presentation/widgets/swipe_to_skip.dart';
@@ -184,6 +185,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _rotationController.dispose();
     _waveController.dispose();
+    LockLyricsService.instance.lyricsShownInPlayer = false; // the player is closed
     super.dispose();
   }
 
@@ -217,6 +219,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    // The lock screen shows lyrics only while they are switched on here.
+    LockLyricsService.instance.lyricsShownInPlayer = _showLyrics;
 
     return BlocConsumer<PlayerBloc, PlayerState>(
       buildWhen: (previous, current) {

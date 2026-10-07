@@ -165,7 +165,11 @@ class TtmlParser {
 
     // Match each <p ...>...</p> block
     final pRegex = RegExp(r'<p\b([^>]*)>(.*?)</p>', dotAll: true);
-    final spanRegex = RegExp(r'<span\b([^>]*)>(.*?)</span>', dotAll: true);
+    // Only the innermost spans: Apple wraps background vocals in a span that
+    // itself holds the word spans, and matching the wrapper would put the
+    // inner opening tag into the lyrics text.
+    final spanRegex = RegExp(r'<span\b([^>]*)>((?:(?!<span\b).)*?)</span>', dotAll: true);
+    final tagRegex = RegExp(r'<[^>]*>');
     final beginAttrRegex = RegExp(r'begin=["\x27]([^"\x27]*)["\x27]');
     final endAttrRegex = RegExp(r'end=["\x27]([^"\x27]*)["\x27]');
 
@@ -185,7 +189,7 @@ class TtmlParser {
       if (spanMatches.isNotEmpty) {
         for (final span in spanMatches) {
           final spanAttrs = span.group(1) ?? '';
-          final spanText = _decodeEntities(span.group(2) ?? '');
+          final spanText = _decodeEntities((span.group(2) ?? '').replaceAll(tagRegex, ''));
 
           final sBeginMatch = beginAttrRegex.firstMatch(spanAttrs);
           final sEndMatch = endAttrRegex.firstMatch(spanAttrs);

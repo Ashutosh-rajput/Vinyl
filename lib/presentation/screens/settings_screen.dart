@@ -277,7 +277,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _divider(),
               SwitchListTile(
                 title: _tileTitle('Lyrics on Lock Screen'),
-                subtitle: _tileSubtitle('Locking the phone while the app is open shows the lyrics full screen'),
+                subtitle: _tileSubtitle('Locking the phone while the main player shows lyrics keeps them on the lock screen'),
                 value: _lockScreenLyrics,
                 activeThumbColor: _accentColor,
                 onChanged: (val) {
