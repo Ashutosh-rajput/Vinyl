@@ -126,6 +126,26 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   /// never mixes the two: Library continues from Library, Stream from Stream.
   static bool _isLibrarySong(Song s) => SongOrigin.isLibrary(s);
   bool _isExpandingQueue = false;
+
+  /// Developer aid: which service(s) suggested each song that Radio or Autoplay
+  /// put in the queue, by song id. Songs the user queued are never in here.
+  final Map<int, Set<SuggestionSource>> _suggestedBy = {};
+
+  /// What Autoplay's latest fetch learned, moved into [_suggestedBy] only for
+  /// the songs that really get queued (the rest are duplicates of queued songs).
+  Map<int, Set<SuggestionSource>> _fetchedSources = {};
+
+  /// The service(s) that suggested [songId] for the queue, or null if the user
+  /// queued it (or the source is unknown).
+  Set<SuggestionSource>? suggestedBy(int songId) => _suggestedBy[songId];
+
+  /// Counts Radio starts. A Radio whose suggestions arrive after a newer one
+  /// started (or after the song changed) is out of date and must not touch the queue.
+  int _radioToken = 0;
+
+  /// Changes whenever Radio replaces the queue, so an Autoplay top-up that was
+  /// fetched for the old queue is dropped instead of being added to the new one.
+  int _queueEpoch = 0;
   // Completes when the Autoplay fetch that is running now has finished, so a
   // Next tap at the end of the queue can wait for it instead of giving up.
   Completer<void>? _expansionDone;
@@ -183,7 +203,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     on<PositionChangedEvent>(_onPositionChanged);
     on<DurationChangedEvent>(_onDurationChanged);
     on<TrackChangedEvent>(_onTrackChanged);
-    on<StartRadioEvent>(_onStartRadio);
+    on<StartRadioEvent>(_onStartRadio, transformer: restartable());
     on<AutoExpandQueueEvent>(_onAutoExpandQueue);
 
     _listenToStreams();
@@ -691,22 +711,36 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
   Future<void> _onStartRadio(StartRadioEvent event, Emitter<PlayerState> emit) async {
     final currentSong = _currentSong ?? event.song;
+    final token = ++_radioToken;
+    final startedOnGeneration = _playGeneration;
+
+    // The suggestions take seconds. If the user taps Radio again, or the song
+    // changes meanwhile, this Radio is out of date and must not touch the queue.
+    bool outdated() {
+      if (token != _radioToken || startedOnGeneration != _playGeneration) return true;
+      final now = _currentSong; // null when Radio itself is what starts the music
+      return now != null && now.id != currentSong.id;
+    }
+
     _showToast('Starting radio for "${currentSong.title}"...');
 
     try {
       final recent = _repository != null
           ? await _repository.getLastPlayedStreamSongs(limit: 20)
           : <Song>[];
+      if (outdated()) return;
       final suggestions = await _radioSuggestions.suggest(
         [SeedSong.fromSong(currentSong)],
         limit: 25,
         exclude: _excluded(recent),
       );
+      if (outdated()) return;
       List<Song> radioSongs = [for (final s in suggestions) s.toSong()];
 
       // Fallback to artist search if recommendations are empty
       if (radioSongs.isEmpty && currentSong.artist.trim().isNotEmpty && currentSong.artist != 'Unknown') {
         final artistResults = await JioSaavnDecoder.searchSongs(currentSong.artist.trim());
+        if (outdated()) return;
         radioSongs = artistResults
             .where((item) => item.isSong && item.title.trim().isNotEmpty)
             .map((item) => item.toSong())
@@ -717,12 +751,22 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
             .toList();
       }
 
+      if (outdated()) return;
+
       if (radioSongs.isEmpty) {
         _showToast('Could not find radio tracks for "${currentSong.title}".');
         return;
       }
 
       // Populate queue with current track followed by radio tracks
+      _queueEpoch++;
+      _suggestedBy
+        ..clear() // the queue is replaced, so the old labels go with it
+        ..addAll({
+          for (final s in suggestions) s.toSong().id: s.sources,
+          if (suggestions.isEmpty)
+            for (final s in radioSongs) s.id: {SuggestionSource.jioSaavn}, // the artist-search fallback
+        });
       _autoplayAnchor = currentSong;
       _autoplayIds.clear();
       _queue = [currentSong, ...radioSongs];
@@ -1237,6 +1281,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
     _isExpandingQueue = true;
     _expansionDone = Completer<void>();
+    final epoch = _queueEpoch;
     try {
       // Seed from the song the user actually chose, not the last queued song.
       // The last song is usually one Autoplay added itself, so seeding from
@@ -1251,6 +1296,10 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
       final recs = _isLibrarySong(seedSong)
           ? await _libraryAutoplaySongs(seedSong)
           : await _streamAutoplaySongs(seedSong);
+
+      // Radio replaced the queue while these were being found: they belong to
+      // the old queue.
+      if (epoch != _queueEpoch) return;
 
       if (recs.isNotEmpty) {
         final existingIds = _queue.map((s) => s.id).toSet();
@@ -1280,10 +1329,16 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
           newTracks.add(s);
         }
 
+        for (final track in newTracks) {
+          final sources = _fetchedSources[track.id];
+          if (sources != null) _suggestedBy[track.id] = sources;
+        }
+
         if (newTracks.isNotEmpty) {
           // Pre-resolve stream URLs for JioSaavn tracks in parallel (up to 6 at once)
           // so they can be appended directly to the player's playlist.
           final resolvedTracks = await _resolveStreamUrls(newTracks);
+          if (epoch != _queueEpoch) return; // Radio replaced the queue meanwhile
 
           // Update in-memory queue with resolved URLs
           for (final resolved in resolvedTracks) {
@@ -1331,6 +1386,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     final seeds = _autoplaySeeds(seed);
     final suggestions = await _suggestions.suggest(seeds, limit: 15, exclude: _excluded(recent));
     final recs = [for (final s in suggestions) s.toSong()];
+    _fetchedSources = {for (final s in suggestions) s.toSong().id: s.sources};
     if (recs.isNotEmpty) return recs;
 
     final existingIds = _queue.map((s) => s.id).toSet();

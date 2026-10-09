@@ -6,6 +6,16 @@ import 'package:vinyl/data/models/song_model.dart';
 /// prefers MetaBrainz, then Deezer, then YouTube, then JioSaavn.
 enum SuggestionSource { metaBrainz, deezer, youtube, jioSaavn }
 
+extension SuggestionSourceName on SuggestionSource {
+  /// The service's name as shown to people.
+  String get label => switch (this) {
+        SuggestionSource.metaBrainz => 'MetaBrainz',
+        SuggestionSource.deezer => 'Deezer',
+        SuggestionSource.youtube => 'YouTube',
+        SuggestionSource.jioSaavn => 'JioSaavn',
+      };
+}
+
 extension SuggestionSourcePriority on SuggestionSource {
   /// Base score of a suggestion from this source. The gap between tiers is
   /// larger than anything the rank inside a tier can add, so a higher-priority

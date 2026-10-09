@@ -41,6 +41,8 @@ class SettingsService {
   static const _keyShuffleByDefault = 'setting_shuffle_default';
   static const _keyResumeLastSong = 'setting_resume_last';
   static const _keyLockScreenLyrics = 'setting_lock_screen_lyrics';
+  static const _keyPlayerShowsLyrics = 'setting_player_shows_lyrics';
+  static const _keyShowSuggestionSource = 'setting_dev_show_suggestion_source';
   static const _keyDefaultVolume = 'setting_default_volume';
   static const _keyDownloadQuality = 'setting_download_quality';
   static const _keyDownloadFormat = 'setting_download_format';
@@ -114,6 +116,21 @@ class SettingsService {
   /// Show the synced lyrics above the lock screen while a song plays.
   bool get lockScreenLyrics => _prefs.getBool(_keyLockScreenLyrics) ?? false;
   Future<void> setLockScreenLyrics(bool value) => _prefs.setBool(_keyLockScreenLyrics, value);
+
+  /// Developer option: label every suggested song with the service it came from.
+  bool get showSuggestionSource => _prefs.getBool(_keyShowSuggestionSource) ?? false;
+
+  /// Labels already on screen listen to this, so the switch takes effect at once.
+  late final ValueNotifier<bool> showSuggestionSourceNotifier = ValueNotifier<bool>(showSuggestionSource);
+  Future<void> setShowSuggestionSource(bool value) async {
+    await _prefs.setBool(_keyShowSuggestionSource, value);
+    showSuggestionSourceNotifier.value = value;
+  }
+
+  /// The main player's lyrics switch. It is remembered, so lyrics stay on when
+  /// the player is minimised or reopened, and the lock screen follows it.
+  bool get playerShowsLyrics => _prefs.getBool(_keyPlayerShowsLyrics) ?? false;
+  Future<void> setPlayerShowsLyrics(bool value) => _prefs.setBool(_keyPlayerShowsLyrics, value);
   double get defaultVolume => _prefs.getDouble(_keyDefaultVolume) ?? 0.8;
   String get downloadQuality =>
       _prefs.getString(_keyDownloadQuality) ?? 'Best';

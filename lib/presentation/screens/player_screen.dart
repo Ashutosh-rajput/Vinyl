@@ -117,7 +117,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   StreamSubscription<bool>? _playingSubscription;
   bool _isDragging = false;
   double _dragPosition = 0.0;
-  bool _showLyrics = false;
+  // Remembered: lyrics stay on when the player is minimised, reopened or the app restarts.
+  bool _showLyrics = getIt<SettingsService>().playerShowsLyrics;
   final GlobalKey<LyricsViewState> _lyricsKey = GlobalKey<LyricsViewState>();
 
   // Swipe-down-to-minimise: drives this route's slide animation by hand.
@@ -185,7 +186,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _rotationController.dispose();
     _waveController.dispose();
-    LockLyricsService.instance.lyricsShownInPlayer = false; // the player is closed
     super.dispose();
   }
 
@@ -219,8 +219,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    // The lock screen shows lyrics only while they are switched on here.
-    LockLyricsService.instance.lyricsShownInPlayer = _showLyrics;
+    // The lock screen follows this switch, and it is remembered across restarts.
+    if (LockLyricsService.instance.lyricsOn != _showLyrics) {
+      LockLyricsService.instance.lyricsOn = _showLyrics;
+      getIt<SettingsService>().setPlayerShowsLyrics(_showLyrics);
+    }
 
     return BlocConsumer<PlayerBloc, PlayerState>(
       buildWhen: (previous, current) {

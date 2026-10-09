@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:vinyl/core/utils/edit_queue.dart';
 import 'package:vinyl/data/models/song_model.dart';
 import 'package:vinyl/services/stream_cache_service.dart';
 import 'package:logger/logger.dart';
@@ -301,9 +302,17 @@ class AudioPlayerService {
   /// JioSaavn songs with empty filePath are skipped here — they will be
   /// resolved and appended individually by PlayerBloc once their stream URL
   /// is fetched (see _preResolveNextTrack and _expandQueueInternal).
-  Future<void> addSongsToQueue(List<Song> songs) async {
+  Future<void> addSongsToQueue(List<Song> songs) {
     final validSongs = songs.where((s) => s.filePath.trim().isNotEmpty).toList();
-    if (validSongs.isEmpty) return;
+    if (validSongs.isEmpty) return Future<void>.value();
+    return _playlistEdits.run((_) => _addSongs(validSongs));
+  }
+
+  /// Every change to the player's playlist goes through this queue, so two
+  /// edits never interleave (see [EditQueue]).
+  final EditQueue _playlistEdits = EditQueue();
+
+  Future<void> _addSongs(List<Song> validSongs) async {
     // Nothing loaded yet: the next play() call builds the playlist.
     if (_audioPlayer == null || player.sequence.isEmpty) return;
     try {
@@ -328,7 +337,15 @@ class AudioPlayerService {
   /// [upcoming], so natural track changes follow the app's queue order after
   /// "Play Next", removals, reordering or shuffle. The playing item is never
   /// touched, so playback does not restart.
-  Future<void> syncUpcoming(Song current, List<Song> upcoming) async {
+  ///
+  /// Syncs run one at a time and only the newest counts: tapping Radio several
+  /// times used to start overlapping syncs whose removes and adds interleaved,
+  /// leaving songs from several lists in the player that the app's queue did
+  /// not know about, so a different song started when the current one ended.
+  Future<void> syncUpcoming(Song current, List<Song> upcoming) =>
+      _playlistEdits.run((superseded) => _syncUpcoming(current, upcoming, superseded), latestWins: true);
+
+  Future<void> _syncUpcoming(Song current, List<Song> upcoming, bool Function() superseded) async {
     if (_audioPlayer == null) return;
     final sequence = player.sequence;
     final index = player.currentIndex;
@@ -340,6 +357,7 @@ class AudioPlayerService {
       if (index + 1 < sequence.length) {
         await player.removeAudioSourceRange(index + 1, sequence.length);
       }
+      if (superseded()) return; // a newer sync runs next and adds its own list
       final playable = upcoming
           .where((s) => s.filePath.trim().isNotEmpty && s.id != current.id)
           .take(_maxWindowSize)

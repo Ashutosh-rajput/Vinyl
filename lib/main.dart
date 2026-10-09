@@ -151,6 +151,7 @@ class _PixelPlayerAppState extends State<PixelPlayerApp> with WidgetsBindingObse
     LockLyricsService.instance.attach(
       _navigatorKey,
       enabled: getIt.isRegistered<SettingsService>() && getIt<SettingsService>().lockScreenLyrics,
+      lyricsOn: getIt.isRegistered<SettingsService>() && getIt<SettingsService>().playerShowsLyrics,
     );
   }
 

@@ -15,6 +15,7 @@ import 'package:vinyl/presentation/screens/home_screen.dart';
 import 'package:vinyl/presentation/widgets/album_art_widget.dart';
 import 'package:vinyl/presentation/widgets/arrival_list.dart';
 import 'package:vinyl/presentation/widgets/stream_home_skeleton.dart';
+import 'package:vinyl/presentation/widgets/suggestion_source_chip.dart';
 import 'package:vinyl/presentation/widgets/suggestion_placeholder_rows.dart';
 import 'package:vinyl/presentation/widgets/download_queue_snackbar.dart';
 import 'package:vinyl/services/download_service.dart';
@@ -60,6 +61,9 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
   List<Song> _topPlayed = [];
   List<Song> _lastPlayedStreamSongs = [];
   List<JioSaavnItem> _suggestedSongs = [];
+
+  /// Which service(s) each suggested song came from, by song id (developer option).
+  Map<String, Set<SuggestionSource>> _suggestionSources = {};
 
   // Suggestions arrive in stages: YouTube and JioSaavn first, MetaBrainz's
   // songs (slow: 20-40 s) later. They are shown as they come.
@@ -419,6 +423,7 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
       ),
       builder: (ctx) => _SuggestedSongsSheet(
         songs: _suggestedSongs,
+        sources: _suggestionSources,
         hasPersonalization: _topPlayed.isNotEmpty || StreamFavoritesService.instance.favorites.isNotEmpty,
       ),
     );
@@ -447,7 +452,10 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
         .listen(
       (suggestions) {
         if (!mounted) return;
-        setState(() => _suggestedSongs = [for (final s in suggestions) s.item]);
+        setState(() {
+          _suggestedSongs = [for (final s in suggestions) s.item];
+          _suggestionSources = {for (final s in suggestions) s.item.id: s.sources};
+        });
       },
       onDone: () {
         if (!mounted) return;
@@ -478,7 +486,10 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
     if (seedId == null || seedId.isEmpty) return;
     final suggestions = await JioSaavnDecoder.fetchSongSuggestions(seedId, limit: 25);
     if (mounted && suggestions.isNotEmpty && _suggestedSongs.isEmpty) {
-      setState(() => _suggestedSongs = suggestions);
+      setState(() {
+        _suggestedSongs = suggestions;
+        _suggestionSources = {for (final s in suggestions) s.id: {SuggestionSource.jioSaavn}};
+      });
     }
   }
 
@@ -1046,6 +1057,7 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
             animateInitial: true,
             itemBuilder: (context, item) => _StreamSongTile(
               item: item,
+              sources: _suggestionSources[item.id],
               isLoading: _loadingSongId == item.id,
               onPlay: () => _streamSingleSong(
                 item,
@@ -1957,6 +1969,9 @@ String _downloadUrlFor(JioSaavnItem track) {
 
 class _StreamSongTile extends StatelessWidget {
   final JioSaavnItem item;
+
+  /// Where the song was suggested from; shown only with the developer option.
+  final Set<SuggestionSource>? sources;
   final bool isLoading;
   final VoidCallback onPlay;
   final VoidCallback onDownload;
@@ -1966,6 +1981,7 @@ class _StreamSongTile extends StatelessWidget {
 
   const _StreamSongTile({
     required this.item,
+    this.sources,
     this.isLoading = false,
     required this.onPlay,
     required this.onDownload,
@@ -1999,6 +2015,7 @@ class _StreamSongTile extends StatelessWidget {
       ),
       subtitle: Row(
         children: [
+          SuggestionSourceChip(sources: sources),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             margin: const EdgeInsets.only(right: 6),
@@ -2205,10 +2222,12 @@ class _StreamCard extends StatelessWidget {
 
 class _SuggestedSongsSheet extends StatelessWidget {
   final List<JioSaavnItem> songs;
+  final Map<String, Set<SuggestionSource>> sources;
   final bool hasPersonalization;
 
   const _SuggestedSongsSheet({
     required this.songs,
+    required this.sources,
     required this.hasPersonalization,
   });
 
@@ -2384,11 +2403,18 @@ class _SuggestedSongsSheet extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
                           ),
-                          subtitle: Text(
-                            track.subtitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.outfit(fontSize: 12),
+                          subtitle: Row(
+                            children: [
+                              SuggestionSourceChip(sources: sources[track.id]),
+                              Expanded(
+                                child: Text(
+                                  track.subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.outfit(fontSize: 12),
+                                ),
+                              ),
+                            ],
                           ),
                           trailing: IconButton(
                             icon: const Icon(Icons.more_vert_rounded, size: 20),

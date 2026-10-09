@@ -18,17 +18,17 @@ void main() {
       expect(LockLyricsService.permissionHelp(maker), contains('Unrestricted'));
     }
   });
-  group('lyrics appear on the lock screen only when the main player shows them', () {
+  group('lyrics appear on the lock screen only when the lyrics switch in the main player is on', () {
     bool show({bool enabled = true, bool lyrics = true, bool playing = true, bool showing = false}) =>
         LockLyricsService.shouldShow(
           enabled: enabled,
-          lyricsShownInPlayer: lyrics,
+          lyricsOn: lyrics,
           playing: playing,
           alreadyShowing: showing,
         );
 
     test('setting on, song playing, lyrics on in the player: shown', () => expect(show(), isTrue));
-    test('lyrics off in the main player (album art showing): not shown', () => expect(show(lyrics: false), isFalse));
+    test('lyrics switched off in the main player: not shown', () => expect(show(lyrics: false), isFalse));
     test('setting off: not shown', () => expect(show(enabled: false), isFalse));
     test('nothing playing: not shown', () => expect(show(playing: false), isFalse));
     test('already on screen: not opened twice', () => expect(show(showing: true), isFalse));

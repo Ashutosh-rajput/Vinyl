@@ -37,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _shuffleByDefault;
   late bool _resumeLastSong;
   late bool _lockScreenLyrics;
+  late bool _showSuggestionSource;
   late bool _showPlayerWaveform;
 
   // Download Settings State
@@ -105,6 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _shuffleByDefault = _settingsService.shuffleByDefault;
     _resumeLastSong = _settingsService.resumeLastSong;
     _lockScreenLyrics = _settingsService.lockScreenLyrics;
+    _showSuggestionSource = _settingsService.showSuggestionSource;
     _showPlayerWaveform = _settingsService.showPlayerWaveform;
 
     _downloadFormat = _settingsService.downloadFormat;
@@ -277,7 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _divider(),
               SwitchListTile(
                 title: _tileTitle('Lyrics on Lock Screen'),
-                subtitle: _tileSubtitle('Locking the phone while the main player shows lyrics keeps them on the lock screen'),
+                subtitle: _tileSubtitle('Shown on the lock screen only while lyrics are switched on in the main player'),
                 value: _lockScreenLyrics,
                 activeThumbColor: _accentColor,
                 onChanged: (val) {
@@ -987,6 +989,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ],
                     ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // DEVELOPER SECTION
+          _buildSectionHeader('Developer'),
+          _buildCardContainer(
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                title: _tileTitle('Show suggestion source'),
+                subtitle: _tileSubtitle('Label each suggested song with the service it came from'),
+                value: _showSuggestionSource,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _showSuggestionSource = val);
+                  _settingsService.setShowSuggestionSource(val);
+                },
+              ),
+            ],
           ),
 
           const SizedBox(height: 20),

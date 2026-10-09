@@ -494,6 +494,177 @@ void main() {
         expect(suggestions.asked, isEmpty); // the Autoplay service was not used
       });
 
+      group('tapping Radio again, or changing song, while Radio is loading', () {
+        late MockAudioPlayerService player;
+        PlayerBloc radioBloc(ScriptedProvider radio) {
+          player = MockAudioPlayerService();
+          final bloc = PlayerBloc(
+            audioService: player,
+            suggestionService: SuggestionService(providers: [suggestions], resolver: JioResolver(search: (q) async => const [])),
+            radioSuggestionService: SuggestionService(providers: [radio], resolver: JioResolver(search: (q) async => const [])),
+          );
+          addTearDown(bloc.close);
+          return bloc;
+        }
+
+        test('several taps leave exactly one radio list in the queue', () async {
+          var call = 0;
+          final gates = <Completer<void>>[];
+          final radio = ScriptedProvider()
+            ..script = (_) async {
+              final n = ++call;
+              final gate = Completer<void>();
+              gates.add(gate);
+              await gate.future;
+              return [
+                createItem('r${n}a', 'Radio $n A', artist: 'Radio Artist ${n}a'),
+                createItem('r${n}b', 'Radio $n B', artist: 'Radio Artist ${n}b'),
+              ];
+            };
+          final bloc = radioBloc(radio);
+          final song = createSong(1, 'Current Song', artist: 'Some Artist');
+          bloc.add(PlayQueueEvent([song], initialIndex: 0)); // Radio is used on a song that is playing
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 1)));
+
+          bloc.add(StartRadioEvent(song));
+          await Future.delayed(const Duration(milliseconds: 50));
+          bloc.add(StartRadioEvent(song));
+          await Future.delayed(const Duration(milliseconds: 50));
+          bloc.add(StartRadioEvent(song));
+          await Future.delayed(const Duration(milliseconds: 50));
+
+          // The answers come back in the worst order: newest first, oldest last.
+          for (final gate in gates.reversed) {
+            gate.complete();
+            await Future.delayed(const Duration(milliseconds: 80));
+          }
+          await Future.delayed(const Duration(milliseconds: 150));
+
+          final queue = (bloc.state as PlayerPlaying).queue;
+          final titles = queue.map((s) => s.title).toList();
+          expect(titles.first, 'Current Song');
+          expect(titles.length, 3, reason: 'one radio list only, never two mixed: $titles');
+          expect(titles.skip(1).every((t) => t.startsWith('Radio 3')), isTrue, reason: 'the last tap wins: $titles');
+
+          // What the audio player will play next must be the same list the
+          // screen shows. (The bug: the screen showed one list while the player
+          // had been given another, so a different song started.)
+          final forPlayer = (player.lastSyncedUpcoming ?? <Song>[]).map((s) => s.title).toList();
+          expect(forPlayer, titles.skip(1).toList(), reason: 'player and screen disagree: $forPlayer vs $titles');
+        });
+
+        test('a Radio that finishes after the song changed does not touch the queue', () async {
+          final gate = Completer<void>();
+          final radio = ScriptedProvider()
+            ..script = (_) async {
+              await gate.future;
+              return [createItem('late', 'Late Radio Song', artist: 'Late Artist')];
+            };
+          final bloc = radioBloc(radio);
+
+          final first = createSong(1, 'First Song');
+          bloc.add(PlayQueueEvent([first], initialIndex: 0));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 1)));
+
+          bloc.add(StartRadioEvent(first));
+          await Future.delayed(const Duration(milliseconds: 50));
+
+          // The user moves on to another song while Radio is still loading.
+          final second = createSong(2, 'Second Song');
+          bloc.add(PlayQueueEvent([second], initialIndex: 0));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 2)));
+
+          gate.complete();
+          await Future.delayed(const Duration(milliseconds: 200));
+
+          final playing = bloc.state as PlayerPlaying;
+          expect(playing.song.id, 2);
+          final titles = playing.queue.map((s) => s.title).toList();
+          expect(titles.first, 'Second Song');
+          expect(titles, isNot(contains('Late Radio Song')),
+              reason: 'the radio of the previous song must not replace the queue');
+        });
+      });
+
+      group('the queue knows which service suggested each song (developer option)', () {
+        test('Radio songs are labelled with their service, the current song is not', () async {
+          final radio = ScriptedProvider()
+            ..script = (_) async => [
+                  createItem('r1', 'Radio Track 1', artist: 'Radio Artist 1'),
+                  createItem('r2', 'Radio Track 2', artist: 'Radio Artist 2'),
+                ];
+          final bloc = PlayerBloc(
+            audioService: MockAudioPlayerService(),
+            suggestionService: SuggestionService(providers: [suggestions], resolver: JioResolver(search: (q) async => const [])),
+            radioSuggestionService: SuggestionService(providers: [radio], resolver: JioResolver(search: (q) async => const [])),
+          );
+          addTearDown(bloc.close);
+
+          final song = createSong(1, 'Current Song', artist: 'Some Artist');
+          bloc.add(StartRadioEvent(song));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length == 3)));
+
+          final queue = (bloc.state as PlayerPlaying).queue;
+          expect(bloc.suggestedBy(queue[0].id), isNull); // the song the user chose
+          expect(bloc.suggestedBy(queue[1].id), {SuggestionSource.jioSaavn});
+          expect(bloc.suggestedBy(queue[2].id), {SuggestionSource.jioSaavn});
+        });
+
+        test('Autoplay songs are labelled, the ones the user queued are not', () async {
+          final queue = [createSong(1, 'Only Song', artist: 'Seed Artist')];
+          playerBloc.add(PlayQueueEvent(queue, initialIndex: 0));
+          await expectLater(playerBloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 1)));
+
+          final songs = (playerBloc.state as PlayerPlaying).queue;
+          expect(playerBloc.suggestedBy(songs.first.id), isNull);
+          for (final added in songs.skip(1)) {
+            expect(playerBloc.suggestedBy(added.id), {SuggestionSource.jioSaavn}, reason: added.title);
+          }
+        });
+
+        test('a song that was already queued by the user does not get a label when suggested again', () async {
+          suggestions.script = (_) async => [
+                createItem('x1', 'Already Queued', artist: 'Seed Artist'),
+                createItem('x2', 'Fresh Track', artist: 'Another Artist'),
+              ];
+          final mine = createSong(1, 'Already Queued', artist: 'Seed Artist');
+          playerBloc.add(PlayQueueEvent([mine], initialIndex: 0));
+          await expectLater(playerBloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.length > 1)));
+
+          expect(playerBloc.suggestedBy(mine.id), isNull);
+          final fresh = (playerBloc.state as PlayerPlaying).queue.firstWhere((s) => s.title == 'Fresh Track');
+          expect(playerBloc.suggestedBy(fresh.id), {SuggestionSource.jioSaavn});
+        });
+
+        test('a new Radio replaces the old labels together with the old queue', () async {
+          var round = 0;
+          final radio = ScriptedProvider()
+            ..script = (_) async {
+              round++;
+              return [createItem('r$round', 'Radio Round $round', artist: 'Artist $round')];
+            };
+          final bloc = PlayerBloc(
+            audioService: MockAudioPlayerService(),
+            suggestionService: SuggestionService(providers: [suggestions], resolver: JioResolver(search: (q) async => const [])),
+            radioSuggestionService: SuggestionService(providers: [radio], resolver: JioResolver(search: (q) async => const [])),
+          );
+          addTearDown(bloc.close);
+
+          final song = createSong(1, 'Current Song', artist: 'Some Artist');
+          bloc.add(PlayQueueEvent([song], initialIndex: 0));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.song.id == 1)));
+
+          bloc.add(StartRadioEvent(song));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.any((x) => x.title == 'Radio Round 1'))));
+          final first = (bloc.state as PlayerPlaying).queue.firstWhere((s) => s.title == 'Radio Round 1');
+          expect(bloc.suggestedBy(first.id), isNotNull);
+
+          bloc.add(StartRadioEvent(song));
+          await expectLater(bloc.stream, emitsThrough(predicate<PlayerState>((s) => s is PlayerPlaying && s.queue.any((x) => x.title == 'Radio Round 2'))));
+          expect(bloc.suggestedBy(first.id), isNull); // gone with the old queue
+        });
+      });
+
       test('suggestions that are already in the queue are not added again', () async {
         suggestions.script = (_) async => [
               createItem('x1', 'Already Queued', artist: 'Seed Artist'),

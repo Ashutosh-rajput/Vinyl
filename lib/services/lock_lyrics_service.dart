@@ -23,15 +23,16 @@ class LockLyricsService {
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _enabled = false;
 
-  /// Whether the main player is open with its lyrics switched on. The lock
-  /// screen shows lyrics only then: a player showing the album art has not
-  /// asked for them.
-  bool lyricsShownInPlayer = false;
+  /// Whether the lyrics switch of the main player is on (it is remembered, so
+  /// it stays on while the player is minimised). The lock screen shows lyrics
+  /// only then: a player showing the album art has not asked for them.
+  bool lyricsOn = false;
   Route<void>? _route;
 
   /// Connects the service to the app's navigator and applies the saved setting.
-  void attach(GlobalKey<NavigatorState> navigatorKey, {required bool enabled}) {
+  void attach(GlobalKey<NavigatorState> navigatorKey, {required bool enabled, bool lyricsOn = false}) {
     _navigatorKey = navigatorKey;
+    this.lyricsOn = lyricsOn;
     _channel.setMethodCallHandler(_onCall);
     setEnabled(enabled);
   }
@@ -116,18 +117,18 @@ class LockLyricsService {
   @visibleForTesting
   static bool shouldShow({
     required bool enabled,
-    required bool lyricsShownInPlayer,
+    required bool lyricsOn,
     required bool playing,
     required bool alreadyShowing,
   }) =>
-      enabled && lyricsShownInPlayer && playing && !alreadyShowing;
+      enabled && lyricsOn && playing && !alreadyShowing;
 
   void _open() {
     final navigator = _navigatorKey?.currentState;
     if (navigator == null || !getIt.isRegistered<PlayerBloc>()) return;
     if (!shouldShow(
       enabled: _enabled,
-      lyricsShownInPlayer: lyricsShownInPlayer,
+      lyricsOn: lyricsOn,
       playing: getIt<PlayerBloc>().state is PlayerPlaying,
       alreadyShowing: _route != null,
     )) {

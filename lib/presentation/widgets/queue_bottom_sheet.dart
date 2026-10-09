@@ -6,6 +6,7 @@ import 'package:vinyl/presentation/bloc/player/player_bloc.dart';
 import 'package:vinyl/presentation/bloc/player/player_event.dart';
 import 'package:vinyl/presentation/bloc/player/player_state.dart';
 import 'package:vinyl/presentation/widgets/album_art_widget.dart';
+import 'package:vinyl/presentation/widgets/suggestion_source_chip.dart';
 
 class QueueBottomSheet extends StatelessWidget {
   const QueueBottomSheet({super.key});
@@ -220,14 +221,23 @@ class QueueBottomSheet extends StatelessWidget {
                                   color: isCurrent ? theme.colorScheme.primary : null,
                                 ),
                               ),
-                              subtitle: Text(
-                                song.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.outfit(
-                                  fontSize: 12,
-                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                                ),
+                              subtitle: Row(
+                                children: [
+                                  // Developer option: the service that suggested this song
+                                  // (Radio / Autoplay songs only; hidden unless switched on).
+                                  SuggestionSourceChip(sources: context.read<PlayerBloc>().suggestedBy(song.id)),
+                                  Expanded(
+                                    child: Text(
+                                      song.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 12,
+                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
