@@ -77,6 +77,13 @@ class SettingsService {
   static const _keySupportBannerDismissed = 'setting_support_banner_dismissed';
   static const _keyHasSeenAppIntro = 'setting_has_seen_app_intro';
 
+  // Suggestion provider toggles (user can turn each service on/off).
+  // Defaults: YouTube + JioSaavn on; MetaBrainz + Deezer off.
+  static const _keySuggestionMetaBrainz = 'setting_suggestion_metabrainz';
+  static const _keySuggestionDeezer = 'setting_suggestion_deezer';
+  static const _keySuggestionYoutube = 'setting_suggestion_youtube';
+  static const _keySuggestionJioSaavn = 'setting_suggestion_jiosaavn';
+
   static const Map<String, String> supportedStreamLanguages = {
     'hindi': 'Hindi',
     'punjabi': 'Punjabi',
@@ -106,6 +113,18 @@ class SettingsService {
   late final ValueNotifier<bool> supportBannerVisible = ValueNotifier<bool>(shouldShowSupportBanner);
   bool get hasSeenAppIntro => _prefs.getBool(_keyHasSeenAppIntro) ?? false;
   Future<void> setHasSeenAppIntro(bool value) => _prefs.setBool(_keyHasSeenAppIntro, value);
+
+  // Suggestion provider toggles
+  bool get suggestionMetaBrainzEnabled => _prefs.getBool(_keySuggestionMetaBrainz) ?? false;
+  bool get suggestionDeezerEnabled => _prefs.getBool(_keySuggestionDeezer) ?? false;
+  bool get suggestionYoutubeEnabled => _prefs.getBool(_keySuggestionYoutube) ?? true;
+  bool get suggestionJioSaavnEnabled => _prefs.getBool(_keySuggestionJioSaavn) ?? true;
+
+  Future<void> setSuggestionMetaBrainzEnabled(bool value) => _prefs.setBool(_keySuggestionMetaBrainz, value);
+  Future<void> setSuggestionDeezerEnabled(bool value) => _prefs.setBool(_keySuggestionDeezer, value);
+  Future<void> setSuggestionYoutubeEnabled(bool value) => _prefs.setBool(_keySuggestionYoutube, value);
+  Future<void> setSuggestionJioSaavnEnabled(bool value) => _prefs.setBool(_keySuggestionJioSaavn, value);
+
   bool get autoPlayNext => _prefs.getBool(_keyAutoPlayNext) ?? true;
   /// Keep playing similar songs once the user's own queue has finished.
   bool get autoplaySimilar => _prefs.getBool(_keyAutoplaySimilar) ?? true;

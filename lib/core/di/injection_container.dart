@@ -18,6 +18,7 @@ import 'package:vinyl/services/suggestion/jio_resolver.dart';
 import 'package:vinyl/services/suggestion/providers/metabrainz_provider.dart';
 import 'package:vinyl/services/suggestion/providers/youtube_provider.dart';
 import 'package:vinyl/services/suggestion/suggestion_service.dart';
+import 'package:vinyl/services/suggestion/suggestion_models.dart';
 import 'package:vinyl/services/user_taste_service.dart';
 import 'package:vinyl/services/stream_favorites_service.dart';
 import 'package:vinyl/services/stream_playlists_service.dart';
@@ -86,12 +87,26 @@ Future<void> getItSetup() async {
   String streamLanguage() => getIt<SettingsService>().streamLanguage;
   double taste(JioSaavnItem item) =>
       getIt<UserTasteService>().likeness(item) * SuggestionService.maxTasteBoost;
+
+  Set<SuggestionSource> enabledSources() {
+    final s = getIt<SettingsService>();
+    final set = <SuggestionSource>{
+      if (s.suggestionMetaBrainzEnabled) SuggestionSource.metaBrainz,
+      if (s.suggestionDeezerEnabled) SuggestionSource.deezer,
+      if (s.suggestionYoutubeEnabled) SuggestionSource.youtube,
+      if (s.suggestionJioSaavnEnabled) SuggestionSource.jioSaavn,
+    };
+    // If the user turned everything off, fall back to all on.
+    return set;
+  }
+
   getIt.registerLazySingleton<SuggestionService>(
     () => SuggestionService.standard(
       language: streamLanguage,
       tasteBoost: taste,
       resolver: jioResolver,
       metaBrainz: metaBrainz,
+      enabledSources: enabledSources,
     ),
   );
   getIt.registerLazySingleton<SuggestionService>(
@@ -101,6 +116,7 @@ Future<void> getItSetup() async {
       tasteBoost: taste,
       resolver: jioResolver,
       metaBrainz: metaBrainz,
+      enabledSources: enabledSources,
     ),
     instanceName: radioSuggestionService,
   );

@@ -55,6 +55,9 @@ class SuggestionService {
   final double Function(JioSaavnItem item)? tasteBoost;
   static const double maxTasteBoost = 0.6;
 
+  /// Dynamic callback providing the currently enabled suggestion sources.
+  final Set<SuggestionSource> Function()? enabledSourcesOf;
+
   SuggestionService({
     required this.providers,
     required this.resolver,
@@ -63,6 +66,7 @@ class SuggestionService {
     this.resolveConcurrency = 6,
     this.resolveDeadline = const Duration(seconds: 12),
     this.tasteBoost,
+    this.enabledSourcesOf,
   });
 
   /// The standard setup: MetaBrainz, Deezer, YouTube and JioSaavn sharing one matcher.
@@ -71,19 +75,26 @@ class SuggestionService {
   /// (used by Radio). Pass the same [metaBrainz] and [resolver] to every
   /// service in the app so that MetaBrainz answers and JioSaavn matches are
   /// fetched once and reused.
+  ///
+  /// [enabledSources] is called dynamically on each suggestion request to
+  /// check which sources are enabled by the user in Settings.
   factory SuggestionService.standard({
     bool includeArtistSongs = false,
     String Function()? language,
     double Function(JioSaavnItem item)? tasteBoost,
     JioResolver? resolver,
     MetaBrainzProvider? metaBrainz,
+    Set<SuggestionSource> Function()? enabledSources,
   }) {
     final jioResolver = resolver ?? JioResolver(youtubeLength: YoutubeProvider.videoLength);
+    final mb = metaBrainz ?? MetaBrainzProvider();
+
     return SuggestionService(
       resolver: jioResolver,
       tasteBoost: tasteBoost,
+      enabledSourcesOf: enabledSources,
       providers: [
-        metaBrainz ?? MetaBrainzProvider(),
+        mb,
         DeezerProvider(),
         YoutubeProvider(),
         JioSaavnProvider(resolver: jioResolver, includeArtistSongs: includeArtistSongs, languageOf: language),
@@ -93,11 +104,17 @@ class SuggestionService {
 
   static const List<double> _seedWeights = [1.0, 0.8, 0.65, 0.5, 0.4];
 
+  List<SuggestionProvider> get _activeProviders {
+    if (enabledSourcesOf == null) return providers;
+    final enabled = enabledSourcesOf!();
+    return providers.where((p) => enabled.contains(p.source)).toList();
+  }
+
   /// Lets the slow providers (MetaBrainz) start working on [seed] now. Call it
   /// when a song starts playing, so the answer is ready when suggestions are
   /// needed minutes later.
   void warmUp(SeedSong seed) {
-    for (final provider in providers) {
+    for (final provider in _activeProviders) {
       if (provider is WarmableProvider) {
         try {
           (provider as WarmableProvider).warmUp(seed);
@@ -149,6 +166,11 @@ class SuggestionService {
     var cancelled = false;
 
     Future<void> work() async {
+      final active = _activeProviders;
+      if (active.isEmpty) {
+        out.add(const []);
+        return;
+      }
       final usedSeeds = seeds.where((s) => s.title.trim().isNotEmpty).take(maxSeeds).toList();
       if (usedSeeds.isEmpty || limit <= 0) return;
 
@@ -167,8 +189,8 @@ class SuggestionService {
         });
       }
 
-      for (var pi = 0; pi < providers.length; pi++) {
-        final provider = providers[pi];
+      for (var pi = 0; pi < active.length; pi++) {
+        final provider = active[pi];
         if (provider is SlowProvider) {
           // Slow source: take what it already knows, and wait for the rest,
           // seed by seed.
@@ -253,12 +275,15 @@ class SuggestionService {
     int limit,
     Iterable<SeedSong> exclude,
   ) async {
+    final active = _activeProviders;
+    if (active.isEmpty) return const [];
+
     final usedSeeds = seeds.where((s) => s.title.trim().isNotEmpty).take(maxSeeds).toList();
     if (usedSeeds.isEmpty || limit <= 0) return const [];
 
     // 1. Ask every provider about every seed, all at once.
     final perSeed = await Future.wait([
-      for (var i = 0; i < usedSeeds.length; i++) _candidatesFor(usedSeeds[i], i, limit),
+      for (var i = 0; i < usedSeeds.length; i++) _candidatesFor(active, usedSeeds[i], i, limit),
     ]);
     return _assemble(perSeed.expand((e) => e).toList(), usedSeeds, limit, exclude);
   }
@@ -352,8 +377,8 @@ class SuggestionService {
     }
   }
 
-  Future<List<_Entry>> _candidatesFor(SeedSong seed, int seedIndex, int limit) async {
-    final lists = await Future.wait(providers.map((p) async {
+  Future<List<_Entry>> _candidatesFor(List<SuggestionProvider> active, SeedSong seed, int seedIndex, int limit) async {
+    final lists = await Future.wait(active.map((p) async {
       try {
         return await p.suggest(seed, limit: max(limit, 20));
       } catch (_) {

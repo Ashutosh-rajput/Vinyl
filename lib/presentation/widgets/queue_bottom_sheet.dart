@@ -223,9 +223,12 @@ class QueueBottomSheet extends StatelessWidget {
                               ),
                               subtitle: Row(
                                 children: [
-                                  // Developer option: the service that suggested this song
-                                  // (Radio / Autoplay songs only; hidden unless switched on).
-                                  SuggestionSourceChip(sources: context.read<PlayerBloc>().suggestedBy(song.id)),
+                                  // Always show the suggestion source in the queue
+                                  // so the user can see which service added each song.
+                                  SuggestionSourceChip(
+                                    sources: context.read<PlayerBloc>().suggestedBy(song.id),
+                                    alwaysShow: true,
+                                  ),
                                   Expanded(
                                     child: Text(
                                       song.artist,

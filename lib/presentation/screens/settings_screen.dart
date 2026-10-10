@@ -78,6 +78,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _supportBannerEnabled;
   bool _isExportingCache = false;
 
+  // Suggestion provider toggles
+  late bool _suggestionMetaBrainz;
+  late bool _suggestionDeezer;
+  late bool _suggestionYoutube;
+  late bool _suggestionJioSaavn;
+
   // Storage Stats (Real File System Calculation)
   double _musicSizeMb = 0.0;
   double _cacheSizeMb = 0.0;
@@ -101,6 +107,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _streamCacheLimit = _settingsService.streamCacheLimit;
     _supportBannerEnabled = _settingsService.isSupportBannerEnabled;
     _autoPlayNext = _settingsService.autoPlayNext;
+
+    _suggestionMetaBrainz = _settingsService.suggestionMetaBrainzEnabled;
+    _suggestionDeezer = _settingsService.suggestionDeezerEnabled;
+    _suggestionYoutube = _settingsService.suggestionYoutubeEnabled;
+    _suggestionJioSaavn = _settingsService.suggestionJioSaavnEnabled;
+
     _autoplaySimilar = _settingsService.autoplaySimilar;
     _repeatMode = _settingsService.repeatMode;
     _shuffleByDefault = _settingsService.shuffleByDefault;
@@ -506,6 +518,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _showSnackBar(val
                       ? 'GitHub support banner enabled'
                       : 'GitHub support banner permanently disabled');
+                },
+              ),
+              _divider(),
+              ListTile(
+                title: _tileTitle('Suggestion Sources'),
+                subtitle: _tileSubtitle('Choose which services power your song recommendations'),
+              ),
+              SwitchListTile(
+                title: _tileTitle('JioSaavn'),
+                value: _suggestionJioSaavn,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _suggestionJioSaavn = val);
+                  _settingsService.setSuggestionJioSaavnEnabled(val);
+                },
+              ),
+              _divider(),
+              SwitchListTile(
+                title: _tileTitle('YouTube'),
+                value: _suggestionYoutube,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _suggestionYoutube = val);
+                  _settingsService.setSuggestionYoutubeEnabled(val);
+                },
+              ),
+              _divider(),
+              SwitchListTile(
+                title: _tileTitle('Deezer'),
+                value: _suggestionDeezer,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _suggestionDeezer = val);
+                  _settingsService.setSuggestionDeezerEnabled(val);
+                },
+              ),
+              _divider(),
+              SwitchListTile(
+                title: _tileTitle('MetaBrainz'),
+                value: _suggestionMetaBrainz,
+                activeThumbColor: _accentColor,
+                onChanged: (val) {
+                  setState(() => _suggestionMetaBrainz = val);
+                  _settingsService.setSuggestionMetaBrainzEnabled(val);
                 },
               ),
               _divider(),
@@ -1159,6 +1215,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
     );
   }
+
 
   Widget _storageRow(String label, String value, Color indicatorColor) {
     return Row(
