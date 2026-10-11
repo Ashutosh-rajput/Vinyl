@@ -484,7 +484,7 @@ class _StreamScreenState extends State<StreamScreen> with AutomaticKeepAliveClie
     }
     seedId ??= _newReleases.where((i) => i.isSong && i.id.isNotEmpty).firstOrNull?.id;
     if (seedId == null || seedId.isEmpty) return;
-    final suggestions = await JioSaavnDecoder.fetchSongSuggestions(seedId, limit: 25);
+    final suggestions = await JioSaavnDecoder.fetchSongSuggestions(seedId, limit: 10);
     if (mounted && suggestions.isNotEmpty && _suggestedSongs.isEmpty) {
       setState(() {
         _suggestedSongs = suggestions;

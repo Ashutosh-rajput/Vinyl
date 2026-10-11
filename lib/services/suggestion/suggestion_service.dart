@@ -396,10 +396,6 @@ class SuggestionService {
     final taken = <String, int>{};
     final toResolve = <_Entry>[];
     for (final e in entries) {
-      if (e.candidate.jio != null) {
-        toResolve.add(e);
-        continue;
-      }
       final key = '${e.seedIndex}|${e.candidate.source.name}';
       final n = taken[key] ?? 0;
       if (n < resolvePerSource) {
@@ -462,13 +458,22 @@ class SuggestionService {
 
     final counts = <String, int>{};
     final out = <_Merged>[];
+    var jioOnlyCount = 0;
+    final hasOtherSources = sorted.any((m) => m.sources.any((s) => s != SuggestionSource.jioSaavn));
+    // When other sources are present, cap pure JioSaavn suggestions so they don't dominate the results.
+    final maxJioOnly = hasOtherSources ? 4 : limit;
+
     for (final m in sorted) {
+      final isJioOnly = m.sources.length == 1 && m.sources.contains(SuggestionSource.jioSaavn);
+      if (isJioOnly && jioOnlyCount >= maxJioOnly) continue;
+
       final artist = artistOf(m);
       if (artist.isNotEmpty) {
         final n = counts[artist] ?? 0;
         if (n >= cap) continue;
         counts[artist] = n + 1;
       }
+      if (isJioOnly) jioOnlyCount++;
       out.add(m);
       if (out.length >= limit) break;
     }

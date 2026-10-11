@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:vinyl/core/utils/jiosaavn_decoder.dart';
 import 'package:vinyl/data/models/jiosaavn_item.dart';
 import 'package:vinyl/services/suggestion/jio_resolver.dart';
@@ -10,7 +12,7 @@ typedef JioArtistSongsFn = Future<List<JioSaavnItem>> Function(String artistId, 
 
 /// Suggestions from JioSaavn's own recommendation call (`reco.getreco`).
 ///
-/// Lowest priority of the three sources, but its songs are already playable,
+/// Lowest priority of the sources, but its songs are already playable,
 /// so they need no matching step.
 ///
 /// With [includeArtistSongs] the credited artists' other songs are added after
@@ -26,6 +28,7 @@ class JioSaavnProvider implements SuggestionProvider {
   /// Read each time, so a change of the Streaming Language applies at once.
   final String Function() languageOf;
   final Duration timeout;
+  final int maxCandidates;
 
   JioSaavnProvider({
     required JioResolver resolver,
@@ -35,6 +38,7 @@ class JioSaavnProvider implements SuggestionProvider {
     this.includeArtistSongs = false,
     String Function()? languageOf,
     this.timeout = const Duration(seconds: 12),
+    this.maxCandidates = 8,
   })  : _resolver = resolver,
         _fetchSuggestions = fetchSuggestions ?? JioSaavnDecoder.fetchSongSuggestions,
         _fetchSongArtists = fetchSongArtists ?? JioSaavnDecoder.fetchSongArtists,
@@ -45,9 +49,9 @@ class JioSaavnProvider implements SuggestionProvider {
   SuggestionSource get source => SuggestionSource.jioSaavn;
 
   @override
-  Future<List<SuggestionCandidate>> suggest(SeedSong seed, {int limit = 25}) async {
+  Future<List<SuggestionCandidate>> suggest(SeedSong seed, {int limit = 8}) async {
     try {
-      return await _suggest(seed, limit).timeout(timeout, onTimeout: () => const []);
+      return await _suggest(seed, min(limit, maxCandidates)).timeout(timeout, onTimeout: () => const []);
     } catch (_) {
       return const [];
     }
@@ -61,15 +65,17 @@ class JioSaavnProvider implements SuggestionProvider {
     }
     if (songId == null || songId.isEmpty) return const [];
 
+    final fetchLimit = min(limit, maxCandidates);
     final found = <JioSaavnItem>[
-      ...await _fetchSuggestions(songId, limit: limit),
+      ...await _fetchSuggestions(songId, limit: fetchLimit),
     ];
 
     if (includeArtistSongs) {
       final artists = await _fetchSongArtists(songId);
-      final lists = await Future.wait(artists.take(4).map((a) async {
+      final lists = await Future.wait(artists.take(2).map((a) async {
         try {
-          return await _fetchArtistSongs(a.id, songId!, lang: languageOf());
+          final songs = await _fetchArtistSongs(a.id, songId!, lang: languageOf());
+          return songs.take(2).toList();
         } catch (_) {
           return <JioSaavnItem>[];
         }
@@ -79,9 +85,10 @@ class JioSaavnProvider implements SuggestionProvider {
       }
     }
 
+    final items = found.take(limit).toList();
     var rank = 0;
     return [
-      for (final item in found)
+      for (final item in items)
         if (item.isSong && item.title.trim().isNotEmpty)
           SuggestionCandidate(
             title: item.title,
