@@ -139,7 +139,13 @@ class MockAudioPlayerService implements AudioPlayerService {
   }
 
   @override
-  Future<void> prepare(Song song) async {}
+  Future<void> prepare(Song song, {List<Song>? queue, int? initialIndex}) async {
+    if (queue != null) {
+      _queue = List.from(queue);
+      _currentIndex = initialIndex ?? _queue.indexWhere((s) => s.id == song.id);
+      if (_currentIndex < 0) _currentIndex = 0;
+    }
+  }
 
   @override
   Future<void> seekToNext() async {

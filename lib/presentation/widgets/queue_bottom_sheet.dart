@@ -223,11 +223,8 @@ class QueueBottomSheet extends StatelessWidget {
                               ),
                               subtitle: Row(
                                 children: [
-                                  // Always show the suggestion source in the queue
-                                  // so the user can see which service added each song.
                                   SuggestionSourceChip(
                                     sources: context.read<PlayerBloc>().suggestedBy(song.id),
-                                    alwaysShow: true,
                                   ),
                                   Expanded(
                                     child: Text(

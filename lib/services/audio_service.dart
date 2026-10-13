@@ -195,8 +195,17 @@ class AudioPlayerService {
     });
   }
 
-  Future<void> prepare(Song song) async {
+  Future<void> prepare(Song song, {List<Song>? queue, int? initialIndex}) async {
     try {
+      final validQueue = queue?.where((s) => s.filePath.trim().isNotEmpty).toList();
+      if (validQueue != null && validQueue.isNotEmpty) {
+        final activeIndex = validQueue.indexWhere((s) => s.id == song.id);
+        final safeActiveIndex = activeIndex != -1 ? activeIndex : (initialIndex ?? 0).clamp(0, validQueue.length - 1);
+        final (window, indexInWindow) = _buildWindowWithIndex(validQueue, safeActiveIndex);
+        final audioSources = window.map(_buildAudioSource).toList();
+        await player.setAudioSources(audioSources, initialIndex: indexInWindow);
+        return;
+      }
       final source = _buildAudioSource(song);
       await player.setAudioSource(source);
     } on PlayerInterruptedException {

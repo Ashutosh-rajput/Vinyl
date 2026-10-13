@@ -306,6 +306,20 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
   DateTime _lastResumePointSave = DateTime.fromMillisecondsSinceEpoch(0);
 
+  void _saveQueue() {
+    if (_settingsService == null) return;
+    try {
+      if (_queue.isEmpty) {
+        _settingsService!.clearSavedPlaybackQueue();
+      } else {
+        final toSave = _queue.length > 100 ? _queue.take(100).toList() : _queue;
+        _settingsService!.setSavedPlaybackQueue(toSave);
+      }
+    } catch (e) {
+      debugPrint('Failed to save playback queue: $e');
+    }
+  }
+
   /// Saves the "resume last song" point. Position ticks arrive many times a
   /// second, so writes are throttled; pausing saves immediately.
   void _saveResumePoint(Song song, Duration position, {bool force = false}) {
@@ -314,6 +328,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _lastResumePointSave = now;
     _settingsService?.setLastPlayedSongId(song.id);
     _settingsService?.setLastPlayedPositionMs(position.inMilliseconds);
+    _saveQueue();
   }
 
   void _onPositionChanged(PositionChangedEvent event, Emitter<PlayerState> emit) {
@@ -566,6 +581,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     }
     _consecutiveFailures = 0;
     _autoplayAnchor = event.song;
+    _saveQueue();
     await _playSongInternal(event.song, emit);
     add(const AutoExpandQueueEvent());
   }
@@ -589,6 +605,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _consecutiveFailures = 0;
     _currentSong = null;
     _autoplayAnchor = targetSong;
+    _saveQueue();
     await _playSongInternal(targetSong, emit);
     add(const AutoExpandQueueEvent());
   }
@@ -800,6 +817,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
   /// through here.
   void _emitUpdatedQueueState(Emitter<PlayerState> emit) {
     _syncPlayerUpcoming();
+    _saveQueue();
     if (state is PlayerPlaying) {
       emit((state as PlayerPlaying).copyWith(
         queue: List.from(_queue),
@@ -876,10 +894,20 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     }
     try {
       if (!_audioService.isPlaying) {
-        await _audioService.resume();
+        if (_audioService.player.audioSource == null) {
+          if (song != null) await _playSongInternal(song, emit);
+        } else {
+          await _audioService.resume();
+        }
       }
+      _preResolveNextTrack();
     } catch (e) {
       debugPrint('Error resuming player: $e');
+      if (song != null) {
+        try {
+          await _playSongInternal(song, emit);
+        } catch (_) {}
+      }
     }
   }
 
@@ -951,9 +979,14 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     bool superseded() => _playGeneration != startGeneration || state is! PlayerInitial;
 
     try {
-      final allSongs = await _repository.getAllSongs();
-      if (superseded()) return;
-      var song = allSongs.where((s) => s.id == lastId).firstOrNull;
+      final savedQueue = _settingsService?.savedPlaybackQueue ?? <Song>[];
+      var song = savedQueue.where((s) => s.id == lastId).firstOrNull;
+
+      if (song == null) {
+        final allSongs = await _repository.getAllSongs();
+        if (superseded()) return;
+        song = allSongs.where((s) => s.id == lastId).firstOrNull;
+      }
 
       // A song that was streamed is not part of the Library (getAllSongs skips
       // those), so it is looked for in the stream history instead.
@@ -961,15 +994,41 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         final streamed = await _repository.getLastPlayedStreamSongs(limit: 10);
         if (superseded()) return;
         song = streamed.where((s) => s.id == lastId).firstOrNull;
-        if (song != null) song = await _withFreshStreamLink(song);
+      }
+
+      if (song != null && (song.source == 'jiosaavn' || song.filePath.startsWith('http'))) {
+        song = await _withFreshStreamLink(song);
         if (superseded()) return;
       }
+
       if (song == null) return;
+
+      final restoredQueue = <Song>[];
+      final seenIds = <int>{};
+      for (final s in savedQueue) {
+        if (s.id == song.id) {
+          restoredQueue.add(song);
+          seenIds.add(s.id);
+        } else {
+          // If local song, check if file exists
+          if (!s.filePath.startsWith('http://') && !s.filePath.startsWith('https://')) {
+            final cleanPath = s.filePath.startsWith('file://') ? Uri.parse(s.filePath).toFilePath() : s.filePath;
+            if (cleanPath.isNotEmpty && (Platform.isAndroid || Platform.isIOS)) {
+              if (!File(cleanPath).existsSync()) continue;
+            }
+          }
+          restoredQueue.add(s);
+          seenIds.add(s.id);
+        }
+      }
+      if (!seenIds.contains(song.id)) {
+        restoredQueue.insert(0, song);
+      }
 
       final posMs = _settingsService?.lastPlayedPositionMs ?? 0;
       final pos = Duration(milliseconds: posMs);
 
-      await _audioService.prepare(song);
+      await _audioService.prepare(song, queue: restoredQueue);
       if (superseded()) return;
       if (pos > Duration.zero) {
         await _audioService.seek(pos);
@@ -978,8 +1037,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
 
       _currentSong = song;
       _autoplayAnchor = song;
-      _queue = [song];
-      _originalQueue = [song];
+      _queue = List.from(restoredQueue);
+      _originalQueue = List.from(restoredQueue);
 
       emit(PlayerPaused(
         song: song,
@@ -989,6 +1048,8 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
         isRepeat: _isRepeat,
         queue: _queue,
       ));
+
+      _preResolveNextTrack();
     } catch (_) {}
   }
 
@@ -1137,6 +1198,7 @@ class PlayerBloc extends Bloc<PlayerEvent, PlayerState> {
     _currentSong = event.song;
     _settingsService?.setLastPlayedSongId(event.song.id);
     _settingsService?.setLastPlayedPositionMs(0);
+    _saveQueue();
     _repository?.updateSong(event.song, notify: false);
     await _repository?.recordSongPlay(event.song);
     UserTasteService.instance.onSongStarted(event.song);

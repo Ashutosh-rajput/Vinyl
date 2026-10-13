@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vinyl/data/models/song_model.dart';
 import 'package:vinyl/data/repositories/music_repository.dart';
 import 'package:vinyl/services/file_service.dart';
 import 'package:vinyl/services/stream_cache_service.dart';
@@ -67,6 +69,7 @@ class SettingsService {
   static const _keyAutoAddSharedSongs = 'setting_auto_add_shared_songs';
   static const _keyLastPlayedSongId = 'setting_last_played_song_id';
   static const _keyLastPlayedPositionMs = 'setting_last_played_position_ms';
+  static const _keySavedPlaybackQueue = 'setting_saved_playback_queue';
 
   static const _keyShowPlayerWaveform = 'setting_show_player_waveform';
   static const _keyStreamLanguage = 'setting_stream_language';
@@ -183,6 +186,19 @@ class SettingsService {
   bool get autoAddSharedSongs => _prefs.getBool(_keyAutoAddSharedSongs) ?? true;
   int? get lastPlayedSongId => _prefs.getInt(_keyLastPlayedSongId);
   int get lastPlayedPositionMs => _prefs.getInt(_keyLastPlayedPositionMs) ?? 0;
+  List<Song> get savedPlaybackQueue {
+    final raw = _prefs.getString(_keySavedPlaybackQueue);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .whereType<Map<String, dynamic>>()
+          .map((m) => Song.fromJson(m))
+          .toList();
+    } catch (e) {
+      return const [];
+    }
+  }
 
   // Setters
   Future<void> setAutoPlayNext(bool value) => _prefs.setBool(_keyAutoPlayNext, value);
@@ -244,6 +260,13 @@ class SettingsService {
     }
   }
   Future<void> setLastPlayedPositionMs(int ms) => _prefs.setInt(_keyLastPlayedPositionMs, ms);
+  Future<void> setSavedPlaybackQueue(List<Song> queue) async {
+    try {
+      final jsonList = queue.map((s) => s.toJson()).toList();
+      await _prefs.setString(_keySavedPlaybackQueue, jsonEncode(jsonList));
+    } catch (_) {}
+  }
+  Future<void> clearSavedPlaybackQueue() => _prefs.remove(_keySavedPlaybackQueue);
 
   // Real Storage & File Operations
   Future<StorageStats> calculateStorageSizes() async {
